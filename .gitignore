@@ -1,0 +1,43 @@
+# Local credentials and identity data must never enter version control.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+secrets/
+private-data/
+
+# JavaScript / web / contract build output.
+node_modules/
+.pnpm-store/
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+packages/contracts/artifacts/
+packages/contracts/cache/
+
+# Local cryptographic witnesses and setup artifacts.
+*.wtns
+*.zkey
+*.ptau
+
+# Python and local tools.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+*.log
+.tools/
+apps/voter-web/out/
+test-results/
+playwright-report/
+packages/contracts/generated/
+services/api/generated/
+
+# Do not ignore benchmark results, lockfiles, or public verification manifests.

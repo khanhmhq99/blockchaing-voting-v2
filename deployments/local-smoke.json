@@ -1,0 +1,15 @@
+{
+  "observedAt": "2026-10-12T02:36:32.213Z",
+  "chainId": 31337,
+  "contractAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "deploymentBlock": "2",
+  "transactionHash": "0xc74e9fb049462c9d62ff5fbde7dd18336b32baf806a200bf2d0c1b32c2d296e7",
+  "owner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "seed": {
+    "electionId": "1",
+    "registeredCandidates": 2,
+    "eligibleCount": "3",
+    "frozen": true
+  },
+  "status": "local deploy and seed verified; disposable chain stopped after check"
+}

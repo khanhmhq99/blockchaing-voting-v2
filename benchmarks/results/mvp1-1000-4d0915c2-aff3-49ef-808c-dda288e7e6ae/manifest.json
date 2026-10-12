@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "runId": "mvp1-1000-4d0915c2-aff3-49ef-808c-dda288e7e6ae",
+  "milestone": "MVP 1",
+  "protocol": "public-wallet-v1",
+  "classification": "observed-local-EVM; simulated network and finality",
+  "reproducibility": "exploratory: repository has no commit",
+  "revision": null,
+  "sourceHash": "9cb9f25da61300f0840e220880d0fd9ab53a62f79a707db9efc8dce3504a5391",
+  "driverHash": "55fa5e396090380e4c647eb606b96c900bc50682fc7c52c3e94449c182803fa9",
+  "lockfileHash": "9b452546b8bff6508461e8e34f6a0c7dd51de0ad868060963db1f820d0e643c3",
+  "rawHash": "2b1236cb3244e028bad72976d39251afaef1700f18d36fee8fc262b7b0697f05",
+  "logicalHash": "e5ac100ffdbfc9e5c53b80e6f4cd1e4a792d4090a5df356ad026ad041e0d1041",
+  "startedAt": "2026-10-12T02:35:51.364Z",
+  "finishedAt": "2026-10-12T02:35:58.170Z",
+  "timezone": "UTC",
+  "clock": "performance.now monotonic milliseconds, fractional resolution; single driver, no distributed clock synchronization",
+  "chain": {
+    "chainId": 31337,
+    "network": "Hardhat local automining",
+    "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "electionId": "3",
+    "firstBlockHash": "0x13ed91e5dede9cbfbff496bd5ce9e923f96c25e43be61dc741cbd779e962be30",
+    "lastBlockHash": "0xcfee1d18a816ecb4e80a1d6cec60b77671db565e49f3c2d4d0caac0bd0b6a56a",
+    "finality": "one local inclusion; no public-network finality",
+    "providerRegion": "same host",
+    "l1Settlement": "not_applicable"
+  },
+  "build": {
+    "node": "v24.21.0",
+    "npm": "11.19.0",
+    "compiler": "0.8.37+commit.f401782d.Emscripten.clang",
+    "settings": {
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "evmVersion": "paris",
+      "outputSelection": {
+        "*": {
+          "*": [
+            "abi",
+            "evm.bytecode.object"
+          ]
+        }
+      }
+    },
+    "bytecodeHash": "0f3e99a63881d0efc70454bea8e644bc9849c12706d7e69b5f2efc64d630a78b",
+    "container": "not_applicable: Windows host"
+  },
+  "hardware": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "logicalCpus": 12,
+    "memoryBytes": 34164101120,
+    "browser": "not_applicable: Node driver",
+    "network": "loopback",
+    "resourceLimits": "uncontrolled workstation"
+  },
+  "workload": {
+    "manifest": {
+      "title": "Synthetic workload 1000",
+      "description": "Public local baseline",
+      "candidates": [
+        {
+          "name": "A",
+          "biography": ""
+        },
+        {
+          "name": "B",
+          "biography": ""
+        }
+      ]
+    },
+    "eligibleVoters": 1000,
+    "choices": "alternating 0/1",
+    "accounts": "fresh ephemeral keys; never persisted",
+    "concurrency": 1,
+    "arrival": "next after receipt",
+    "warmup": "none",
+    "repeats": 1,
+    "authorizationBatch": 200,
+    "fees": "local RPC estimate",
+    "retry": "no logical vote retries",
+    "timeoutMs": 180000,
+    "seed": "not_applicable: fixed choices, random ephemeral addresses"
+  },
+  "crypto": "not_applicable before MVP 3",
+  "analysis": "nearest-rank percentiles; no confidence interval from one run",
+  "exclusions": "deployment and funding excluded; setup and finalize separately recorded",
+  "database": "not configured; local raw artifacts only",
+  "summary": {
+    "voterCount": 1000,
+    "attempted": 1000,
+    "accepted": 1000,
+    "failed": 0,
+    "pending": 0,
+    "failureRate": 0,
+    "durationMs": 5708.2042,
+    "throughputVotesPerSecond": 175.18644480167686,
+    "p50InclusionMs": 5.4234,
+    "p95InclusionMs": 7.7857,
+    "voteGasMin": "64203",
+    "voteGasMax": "98403",
+    "voteGasTotal": "64260300",
+    "allOperationsGas": "90852081",
+    "allOperationsFeeWei": "90852082493279198"
+  }
+}

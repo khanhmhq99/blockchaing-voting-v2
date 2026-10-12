@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["voting"]
+}
+
+// This table cannot grant voting eligibility or determine an election result.
+model ElectionMetadata {
+  id              String   @id @default(uuid()) @db.Uuid
+  chainId         String
+  contractAddress String
+  electionId      String
+  manifestHash    String
+  title           String
+  description     String
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+  candidates      CandidateProfile[]
+
+  @@unique([chainId, contractAddress, electionId])
+  @@schema("voting")
+}
+
+model CandidateProfile {
+  id          String @id @default(uuid()) @db.Uuid
+  metadataId  String @db.Uuid
+  candidateId Int
+  name        String
+  biography   String
+  imageUrl    String?
+  election    ElectionMetadata @relation(fields: [metadataId], references: [id], onDelete: Restrict)
+
+  @@unique([metadataId, candidateId])
+  @@schema("voting")
+}
+
+// Rebuildable projection only. Live vote status is always read from the chain.
+model IndexedEvent {
+  id              String @id @default(uuid()) @db.Uuid
+  chainId         String
+  contractAddress String
+  blockNumber     BigInt
+  blockHash       String
+  transactionHash String
+  logIndex        Int
+  eventName       String
+  payload         Json
+  syncStatus      String @default("confirmed")
+
+  @@unique([chainId, contractAddress, transactionHash, logIndex])
+  @@index([chainId, contractAddress, blockNumber])
+  @@schema("voting")
+}
+
+model BlockchainTransaction {
+  id              String @id @default(uuid()) @db.Uuid
+  chainId         String
+  contractAddress String
+  transactionHash String
+  electionId      String?
+  operation       String
+  status          String
+  blockNumber     BigInt
+  blockHash       String
+  gasUsed         String
+  effectiveGasPrice String
+  observedAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([chainId, transactionHash])
+  @@index([chainId, contractAddress, electionId])
+  @@schema("voting")
+}
+
+model ChainCheckpoint {
+  id              String @id
+  blockNumber     BigInt
+  blockHash       String
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  @@schema("voting")
+}
+
+model BenchmarkRun {
+  id        String @id
+  manifest  Json
+  summary   Json
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  measurements BenchmarkMeasurement[]
+
+  @@schema("voting")
+}
+
+model BenchmarkMeasurement {
+  id               String @id @default(uuid()) @db.Uuid
+  runId            String
+  operation        String
+  transactionHash  String
+  gasUsed          String
+  effectiveGasPrice String
+  confirmationMs   Float
+  success          Boolean
+  errorCode        String?
+  run              BenchmarkRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, transactionHash])
+  @@index([runId, operation])
+  @@schema("voting")
+}

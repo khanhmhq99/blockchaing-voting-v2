@@ -1,0 +1,25 @@
+name: MVP 1 checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:validate
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run benchmark:mvp1
+      # Managed database acceptance is a separate configured environment check.
+      # No remote migrations or signing credentials are used on pull requests.

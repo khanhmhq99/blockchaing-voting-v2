@@ -1,0 +1,8 @@
+{
+  "name": "@voting/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "dev": "next dev --hostname 127.0.0.1", "build": "next build", "typecheck": "tsc --noEmit" },
+  "dependencies": { "next": "16.4.0", "react": "19.3.0", "react-dom": "19.3.0", "viem": "2.57.4", "zod": "4.6.5" },
+  "devDependencies": { "@types/react": "19.2.2", "@types/react-dom": "19.2.2", "tailwindcss": "4.3.3", "@tailwindcss/postcss": "4.3.3" }
+}
