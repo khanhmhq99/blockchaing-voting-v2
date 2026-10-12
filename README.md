@@ -1,6 +1,6 @@
 # Blockchain-Based Electronic Voting
 
-HCMUT Master's thesis research prototype. **MVP 1 is implemented and locally exercised; acceptance is incomplete until live Supabase and real MetaMask checks pass.** Updated 2026-10-12. No public-network deployment, commit or milestone tag was created. MVP 2-6 remain design only.
+HCMUT Master's thesis research prototype. **MVP 2 gasless voting is implemented and locally exercised; milestone acceptance remains incomplete until live Supabase and real MetaMask checks pass.** Updated 2026-10-12. MVP 1 source/ABI/deployment and benchmark evidence are preserved. No public-network deployment, new commit or milestone tag was created in the MVP 2 session. MVP 3-6 remain design only.
 
 The baseline uses public synthetic wallets and choices. Smart contracts determine eligibility, one-vote enforcement, lifecycle and results. Database rows cannot authorize a vote or override a tally.
 
@@ -10,6 +10,7 @@ The baseline uses public synthetic wallets and choices. Smart contracts determin
 - NestJS/TypeScript API with signed, expiring administrative challenges and Viem blockchain reads/indexing.
 - Supabase PostgreSQL through Prisma, with a private schema, verified TLS and separate runtime/migration configuration. No Supabase Auth, Realtime or browser database credentials.
 - Immutable Solidity contract with OpenZeppelin owner checks, candidate commitments, batched synthetic-wallet authorization, frozen configuration, timed voting, cancellation and finalization.
+- Versioned GaslessVoting with OpenZeppelin EIP-712 authorization, election nonces and shared direct/sponsored uniqueness; NestJS relayer with durable idempotency, fee budgets, serialized nonce allocation and canonical receipt checks.
 - Vitest tests, real Hardhat EVM scenarios, Playwright browser workflow, and exploratory 10/100/1000-voter benchmark artifacts.
 
 Node 24.21.0, npm 11.19.0 and all package versions are pinned. See [technology matrix](docs/architecture/technology-stack.md) and the single package-lock.json.
@@ -17,6 +18,8 @@ Node 24.21.0, npm 11.19.0 and all package versions are pinned. See [technology m
 ## Setup and run
 
 Follow [Supabase and deployment instructions](docs/deployment/supabase.md) for credentials, TLS, private-schema roles, migrations and MetaMask. Copy .env.example to an ignored .env and fill only the actual project configuration. There is no local PostgreSQL service or fake production database fallback.
+
+For the gasless demonstration follow [MVP 2 local deployment](docs/deployment/gasless.md): use `npm.cmd run deploy:mvp2`, explicitly configure the new contract and a separate funded relayer, review the additive migration, and enable GASLESS_ENABLED. Voters sign typed data and need zero native balance. The deployment command below retains the MVP 1 baseline.
 
 On this Windows workstation, select the verified portable runtime when the global Node shim fails:
 
@@ -53,11 +56,17 @@ npm.cmd test
 node node_modules/@playwright/test/cli.js install chromium
 npm.cmd run test:e2e
 npm.cmd run benchmark:mvp1
+npm.cmd run benchmark:mvp2
 ```
 
 See [MVP 1 evidence and remaining gates](docs/mvps/mvp-1.md) and [actual baseline measurements](docs/benchmarks/mvp-1-baseline.md). Browser tests use an injected provider transport against real local transactions and a clearly labeled memory database. They do not establish live Supabase or MetaMask extension compatibility. CI is configured but has not been run on GitHub in this session.
 
 ## Documentation
+
+- [MVP 2 evidence and acceptance gates](docs/mvps/mvp-2.md)
+- [Gasless architecture and API](docs/architecture/gasless-voting.md)
+- [MVP 2 paired measurements](docs/benchmarks/mvp-2-gasless.md)
+- [ADR 0008: signed intents and durable sponsorship](docs/architecture/adr/0008-gasless-signed-intents.md)
 
 | Document | Purpose |
 | --- | --- |

@@ -1,6 +1,6 @@
 # MVP 2: Gasless voting
 
-Status: planned; requires explicit owner instruction after MVP 1 acceptance. Intended tag: `mvp-2-gasless` only after acceptance.
+Status: explicitly authorized and implemented locally on 2026-10-12. This original plan is retained; actual scope, verification and unresolved gates are recorded in [MVP 2 evidence](mvp-2.md). Live MVP 1 gates remain open and are not retroactively claimed complete. Intended tag: `mvp-2-gasless` only after full acceptance.
 
 ## Objective and scope
 

@@ -85,6 +85,7 @@ test('admin creates and authorizes; two wallets vote; duplicate is disabled; res
     await page.evaluate(i => (window as unknown as { setTestAccount(i: number): void }).setTestAccount(i), index);
     await page.getByRole('button', { name: 'Kết nối MetaMask' }).click();
     await page.getByRole('button', { name: /Browser election/ }).click();
+    await page.getByLabel('Chế độ bỏ phiếu').selectOption('direct');
     await page.getByRole('radio').nth(index - 1).check();
     if (index === 1) {
       await page.evaluate(() => { (window as unknown as { rejectNextTransaction: boolean }).rejectNextTransaction = true; });

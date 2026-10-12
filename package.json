@@ -31,6 +31,8 @@
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:integration && npm run test:contracts",
     "deploy": "npm run build:contracts && tsx scripts/deploy.ts",
+    "deploy:mvp2": "npm run build:contracts && tsx scripts/deploy-gasless.ts",
+    "benchmark:mvp2": "npm run build:contracts && tsx scripts/benchmark-gasless.ts",
     "benchmark:mvp1": "npm run build:contracts && tsx scripts/benchmark.ts",
     "seed": "tsx scripts/seed.ts"
   },

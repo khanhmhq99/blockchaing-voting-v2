@@ -4,6 +4,7 @@ import { AppModule, SafeExceptionFilter } from '../../services/api/src/app.js';
 import { DatabaseService } from '../../services/api/src/database.js';
 import { payloadHash, type Manifest } from '../../packages/shared-types/src/index.js';
 import type { LocalChain } from './chain.js';
+import { relayerMemoryDatabase } from './relayer-database.js';
 
 // Explicit test double. This does not verify PostgreSQL or Prisma migrations.
 export function memoryDatabase(manifest: Manifest) {
@@ -26,6 +27,11 @@ export function memoryDatabase(manifest: Manifest) {
     events, transactions,
     corrupt: () => { record.title = 'Tampered database title'; },
   };
+  const relay = relayerMemoryDatabase();
+  // Let relayer transactions access both existing metadata and added models.
+  Object.assign(db, { gaslessVoteRequest: relay.gaslessVoteRequest, relayerTransaction: relay.relayerTransaction, relayerBudget: relay.relayerBudget, gaslessRequestHistory: relay.gaslessRequestHistory });
+  const transact = db.$transaction;
+  db.$transaction = work => relay.$transaction(() => transact(work));
   return db;
 }
 export async function testApi(chain: LocalChain, manifest: Manifest, port = 0) {

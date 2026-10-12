@@ -12,3 +12,13 @@ mkdirSync('packages/contracts/src', { recursive: true });
 writeFileSync('packages/contracts/generated/BasicVoting.json', JSON.stringify({ abi: artifact.abi, bytecode: `0x${artifact.evm.bytecode.object}`, compiler: solc.version(), settings }, null, 2) + '\n');
 writeFileSync('packages/contracts/src/abi.ts', '// Generated from BasicVoting.sol by npm run build:contracts.\nexport const votingAbi = ' + JSON.stringify(artifact.abi, null, 2) + ' as const;\n');
 console.log(`Compiled BasicVoting with ${solc.version()}, EVM paris, optimizer 200.`);
+
+const gaslessSource = readFileSync('packages/contracts/contracts/GaslessVoting.sol', 'utf8');
+const gaslessSettings = { ...settings, evmVersion: 'cancun' };
+const gaslessOutput = JSON.parse(solc.compile(JSON.stringify({ language: 'Solidity', sources: { 'GaslessVoting.sol': { content: gaslessSource } }, settings: gaslessSettings }), { import: path => ({ contents: readFileSync(`node_modules/${path}`, 'utf8') }) }));
+for (const error of gaslessOutput.errors ?? []) console.error(error.formattedMessage);
+if (gaslessOutput.errors?.some(e => e.severity === 'error')) process.exit(1);
+const gasless = gaslessOutput.contracts['GaslessVoting.sol'].GaslessVoting;
+writeFileSync('packages/contracts/generated/GaslessVoting.json', JSON.stringify({ abi: gasless.abi, bytecode: `0x${gasless.evm.bytecode.object}`, compiler: solc.version(), settings: gaslessSettings }, null, 2) + '\n');
+writeFileSync('packages/contracts/src/gasless-abi.ts', '// Generated from GaslessVoting.sol by npm run build:contracts.\nexport const gaslessAbi = ' + JSON.stringify(gasless.abi, null, 2) + ' as const;\n');
+console.log(`Compiled GaslessVoting with ${solc.version()}, EVM cancun, optimizer 200.`);

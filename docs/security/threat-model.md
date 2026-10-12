@@ -1,5 +1,15 @@
 # Threat model
 
+## MVP 2 implementation update (2026-10-12)
+
+MVP 2 adds public EOA signed intents and a funded NestJS relayer. Under A1/A3/A4, a malicious relayer or competing voter cannot alter a bound choice or forge an accepted signature: the versioned contract checks EIP-712 domain, frozen manifest, election, voter, candidate, nonce and deadline. Real-EVM tests mutate these fields, replay across domains, race duplicate transactions and verify shared direct/gasless uniqueness. This is not one-person-one-vote, anonymity, coercion resistance or protection from a malicious wallet/client.
+
+The sponsor key is environment-only and prohibited from matching the admin. Under an honest database/operator, persisted fee reservations and a chain/sender advisory lock bound sponsorship and coordinate nonces. Stored raw transaction hash, recovered sender, destination, chain, value and call selector are checked before sending. Tests cover low balance, gas/budget caps, malformed/unauthorized requests, duplicate admission, persistence failure before broadcast and RPC uncertainty. Global rate buckets are per-process; public read/ingress abuse limits and live SQL concurrency remain deployment gates. A malicious privileged database/operator can censor, change operational budgets or withhold status, but cannot manufacture a voter signature without breaking A3/A4 or stealing it.
+
+Receipt success additionally requires matching VoteCast and canonical block/depth. Reorg tests demote confirmed requests. Unknown replacements, expired unresolved transactions and deep reorgs after recovery-data purge block the lane for operator reconciliation. No automatic fresh transaction retry follows a revert. Active recovery signatures/raw bytes are private database operational data and are purged at terminal outcomes; signatures/choices in accepted transaction calldata remain public forever. Backups may retain purged material until their configured expiry. Define backup retention before external operation.
+
+Relayer availability/censorship, dishonest RPC responses, administrator cancellation/eligibility manipulation, endpoint compromise, public wallet-choice linkage and timing remain residual risks. The prototype uses one sender lane and no automated failover or fee bumps. No real electorate is authorized. See [architecture](../architecture/gasless-voting.md), [ADR 0008](../architecture/adr/0008-gasless-signed-intents.md) and [MVP 2 evidence](../mvps/mvp-2.md).
+
 ## MVP 1 implementation update (2026-10-12)
 
 The owner authorized implementation. Supabase PostgreSQL is a managed metadata/projection store accessed only through NestJS/Prisma. Database compromise must not grant eligibility or change accepted votes: contract tests enforce authorization and atomic uniqueness, and API integration tests corrupt metadata while confirming results still come from the chain. Metadata and candidate profile commitments are checked before display. A malicious API/RPC/client can still mislead a user; this baseline is not the MVP 4 independent verifier.

@@ -4,7 +4,9 @@
 
 This is an HCMUT Master's thesis research prototype for blockchain-based electronic voting. Prioritize correctness, security and privacy, independent verifiability, reproducibility, maintainability, performance, then development speed.
 
-The owner has explicitly authorized MVP 1 implementation and local blockchain deployment. MVP 1 is implemented with acceptance gates recorded in docs/mvps/mvp-1.md; live Supabase and real MetaMask acceptance remain pending. Finish verification and documentation, then stop. Do not start MVP 2 or deploy to mainnet. No destructive managed-database migration is authorized.
+The owner explicitly authorized MVP 2 gasless implementation and local blockchain deployment on 2026-10-12, superseding the earlier MVP 1 stop boundary. Preserve MVP 1 source, ABI, deployments and benchmark evidence. Acceptance gates are recorded in docs/mvps/mvp-1.md and docs/mvps/mvp-2.md; live Supabase and real MetaMask acceptance remain separate gates. Finish MVP 2 verification and documentation, then stop. Do not start MVP 3, deploy to mainnet, spend real cryptocurrency or perform destructive managed-database migrations.
+
+The owner additionally authorized deploying GaslessVoting to BSC Testnet (chain 97) and filling the environment deployment address/block on 2026-10-12. Only test BNB may be spent; this does not authorize mainnet or managed database changes.
 
 Communicate with the owner in Vietnamese. Use English for code, comments, identifiers, filenames, API specifications, and architectural terminology. Documentation in this repository is written in English for consistency.
 

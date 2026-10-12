@@ -27,6 +27,8 @@ There is no anonymous credential, encryption, ZK proof, or threshold decryption 
 
 ## MVP 2: Signed gasless intent
 
+Implementation update 2026-10-12: the exact delivered type is `VotingIntent(uint256 electionId,bytes32 manifestHash,uint256 candidateId,address voter,uint256 nonce,uint256 deadline)` under `HCMUT Gasless Voting` / version `2`. Both direct and sponsored acceptance increment `nonces[electionId][voter]`. The sponsored path is EOA-only. See the [implemented protocol/API](../architecture/gasless-voting.md) and [evidence](../mvps/mvp-2.md); the proposal below is retained as design context.
+
 Use a direct reviewed EIP-712 voting-intent scheme as the initial candidate; ERC-2771 forwarding and account abstraction are alternatives, not additional mandatory subsystems. [EIP-712](https://eips.ethereum.org/EIPS/eip-712) standardizes typed signing but does not supply replay protection.
 
 Proposed typed data (exact Solidity/TypeScript encoding and test vectors are an MVP 2 deliverable):

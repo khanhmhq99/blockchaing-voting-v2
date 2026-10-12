@@ -8,11 +8,15 @@ import { ElectionsService } from './elections.js';
 import { AdminService } from './admin.js';
 import { IndexerService } from './indexer.js';
 import { jsonSafe, manifestSchema } from '../../../packages/shared-types/src/index.js';
+import { InfrastructureModule } from './infrastructure.js';
+import { RelayerModule } from './relayer/module.js';
+import { RelayError } from './relayer/errors.js';
 
 const idSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 @Catch()
 export class SafeExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
+    if (error instanceof RelayError) { host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(error.getStatus()).json(error.getResponse()); return; }
     const status = error instanceof ZodError ? 400 : error instanceof HttpException ? error.getStatus() : 503;
     host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: { code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED', message: status === 503 ? 'A required service is unavailable. Retry later.' : 'Check the request, authorization, or election state.' } });
   }
@@ -64,5 +68,5 @@ export class AppController {
     return this.indexer.sync();
   }
 }
-@Module({ controllers: [AppController], providers: [DatabaseService, ChainService, ElectionsService, AdminService, IndexerService] })
+@Module({ imports: [InfrastructureModule, RelayerModule], controllers: [AppController], providers: [ElectionsService, AdminService, IndexerService] })
 export class AppModule {}

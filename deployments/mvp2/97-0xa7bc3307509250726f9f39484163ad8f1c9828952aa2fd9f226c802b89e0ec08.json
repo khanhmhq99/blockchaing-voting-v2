@@ -1,0 +1,29 @@
+{
+  "protocol": "signed-intent-v2",
+  "chainId": 97,
+  "address": "0xaaa59087819d3e939b7a1d3394c29a3d71c4db50",
+  "deployer": "0x4C175645422617d462f558F4fB7680ADf3826628",
+  "deploymentBlock": "136391892",
+  "transactionHash": "0xa7bc3307509250726f9f39484163ad8f1c9828952aa2fd9f226c802b89e0ec08",
+  "blockHash": "0xc0229c06a2fc26c9c74d5320933737f032dcce9552c6a27e2daa28461a178321",
+  "gasUsed": "1778584",
+  "effectiveGasPrice": "100000000",
+  "creationCodeHash": "0xb6b0c0f8b0a33196ff98c1ca5d2e4ae4e56622689fed16cf231cbc3d7cb07447",
+  "runtimeCodeHash": "0x6c2afe059ac07682c21b954b55787fee5678bcb31d10b524f9923efe645e0d0a",
+  "compiler": "0.8.37+commit.f401782d.Emscripten.clang",
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode.object"
+        ]
+      }
+    }
+  }
+}

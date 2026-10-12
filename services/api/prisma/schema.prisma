@@ -109,3 +109,83 @@ model BenchmarkMeasurement {
   @@index([runId, operation])
   @@schema("voting")
 }
+
+// Durable synthetic public-ballot operations; never voter private keys.
+model GaslessVoteRequest {
+  id              String @id @default(uuid()) @db.Uuid
+  chainId         String
+  contractAddress String
+  electionId      String
+  voterAddress    String
+  candidateId     String
+  manifestHash    String
+  nonce           String
+  deadline        String
+  intentHash      String @unique
+  activeSlot      String? @unique
+  signature       String?
+  status          String
+  errorCode       String?
+  validationMs    Float
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+  confirmedAt     DateTime? @db.Timestamptz(6)
+  transaction     RelayerTransaction?
+  history         GaslessRequestHistory[]
+
+  @@index([chainId, contractAddress, status, createdAt])
+  @@index([chainId, contractAddress, electionId, voterAddress])
+  @@schema("voting")
+}
+
+model GaslessRequestHistory {
+  id        String @id @default(uuid()) @db.Uuid
+  requestId String @db.Uuid
+  status    String
+  errorCode String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  request   GaslessVoteRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@schema("voting")
+}
+
+model RelayerTransaction {
+  id                String @id @default(uuid()) @db.Uuid
+  requestId         String @unique @db.Uuid
+  chainId           String
+  contractAddress   String
+  relayerAddress    String
+  transactionHash   String @unique
+  nonce             Int
+  gasLimit          String
+  gasPrice          String
+  reservedFeeWei    String
+  rawTransaction    String?
+  calldataHash      String
+  status            String
+  gasUsed           String?
+  effectiveGasPrice String?
+  transactionFee    String?
+  blockNumber       BigInt?
+  blockHash         String?
+  queueMs           Float
+  submissionMs      Float?
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+  submittedAt       DateTime? @db.Timestamptz(6)
+  confirmedAt       DateTime? @db.Timestamptz(6)
+  request           GaslessVoteRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@unique([chainId, relayerAddress, nonce])
+  @@index([chainId, relayerAddress, status])
+  @@schema("voting")
+}
+
+model RelayerBudget {
+  id              String @id
+  contractAddress String
+  reservedWei     Decimal @default(0) @db.Decimal(78, 0)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  @@schema("voting")
+}
