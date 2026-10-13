@@ -1,12 +1,18 @@
 # MVP 2 deployment and operation
 
-Use [Supabase setup](supabase.md) for the existing database, verified TLS, private schema and least-privilege roles. MVP 2 only adds tables; it does not recreate MVP 1 data. No managed migration has been executed in this implementation session.
+Use [Supabase setup](supabase.md) for the existing database, verified TLS, private schema and least-privilege roles. MVP 2 only adds tables; it does not recreate MVP 1 data.
+
+MVP 2.5 adds username/password sessions and walletless voting with server-managed election identities. The additive `202610130001_walletless_accounts` migration was applied to the configured Supabase project on 2026-10-13 after explicit owner authorization. The API runtime role was granted DML on only its three new tables.
 
 ## Configuration
 
 Copy the variable names from `.env.example` to secure local environment configuration. Never paste secrets into chat, CLI arguments, source files or browser variables. Keep DATABASE_URL and MIGRATION_DATABASE_URL distinct. Use direct/session connectivity for migrations. Runtime Supabase access remains NestJS/Prisma only.
 
 Set `GASLESS_ENABLED=true` only with a GaslessVoting deployment and migrated database. `RELAYER_PRIVATE_KEY` must be a dedicated server-side disposable signer, different from the contract owner. Fund only that relayer on the local chain; gasless voters should remain at zero native balance. A local chain's unlocked admin can fund the relayer using its public address, without exposing the relayer key. The benchmark/test fixtures generate their own isolated signers and never print their keys.
+
+Set `VOTER_KEY_ENCRYPTION_KEY` to a separately generated 32-byte (64 hex character) secret in the API environment. Keep it outside the database, browser environment, source tree and logs. One local generation option is `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`; place the result directly in an ignored local secret store. Losing this key makes uncast managed election identities unusable. The API uses AES-256-GCM to encrypt private EOA keys generated for each user/election. The API operator can sign for eligible accounts; compromise of the API process or both database and encryption key can impersonate voters. This custody is a deliberate MVP 2.5 assumption, not anonymity or independent voter authorization.
+
+For a disposable local PostgreSQL database only, seed the demo administrator with `DEMO_ADMIN_SEED_ENABLED=true`, `DEMO_ADMIN_PASSWORD=123` and `npm.cmd run seed:demo-admin`. The command refuses production and any database host outside loopback. Change the demo password for any shared environment; never use this seed on Supabase or production.
 
 | Variable | Default / meaning |
 | --- | --- |
@@ -58,7 +64,7 @@ Start the web application in another terminal:
 npm.cmd run dev:web
 ```
 
-Create a new synthetic election with the admin UI, register candidates/eligible wallets, and freeze before opening. Connect a disposable zero-balance voter to the same network. Review the candidate and sign EIP-712. Confirm the receipt's transaction sender is the dedicated relayer and the voter balance remains zero. Reject a signature once, reload a pending request once, and attempt duplicate voting. The Direct Voting selector remains available; the original BasicVoting deployment is the exact MVP 1 benchmark baseline.
+Create a synthetic election with the owner wallet, register candidates, and use the authenticated admin screen to assign users. Admins still connect the contract-owner wallet to write the generated identity address into election eligibility before freezing. Voters log in and submit without MetaMask, a personal wallet, private key or native token; the API signs the existing EIP-712 intent and the relayer pays its network fee. Verify final chain status from the receipt. The `/mvp2-baseline` route retains the original wallet-based MVP 1/2 experience for comparison.
 
 ## Verification
 

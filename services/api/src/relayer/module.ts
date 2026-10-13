@@ -28,5 +28,5 @@ export class RelayerController {
   @Get('intents/:digest') byIntent(@Param('digest') digest: string) { return this.relay.byIntent(z.string().regex(/^0x[0-9a-f]{64}$/).parse(digest)); }
   @Get('votes/:id') status(@Param('id') id: string) { return this.relay.status(z.uuid().parse(id)); }
 }
-@Module({ imports: [InfrastructureModule], controllers: [RelayerController], providers: [IntentAuthorization, TransactionSender, RelayerService] })
+@Module({ imports: [InfrastructureModule], controllers: [RelayerController], providers: [IntentAuthorization, TransactionSender, RelayerService], exports: [RelayerService] })
 export class RelayerModule {}

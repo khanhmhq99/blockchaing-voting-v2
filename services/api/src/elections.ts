@@ -9,7 +9,7 @@ export class ElectionsService {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService) {}
   private key(electionId: string) { return { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, electionId }; }
   async list() {
-    const rows = await this.db.electionMetadata.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address }, take: 100, orderBy: { createdAt: 'desc' } });
+    const rows = await this.db.electionMetadata.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address }, orderBy: { createdAt: 'desc' } });
     return Promise.all(rows.map(row => this.get(row.electionId)));
   }
   async get(id: string, voter?: Address) {

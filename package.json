@@ -25,6 +25,7 @@
     "db:check": "tsx scripts/check-database.ts",
     "db:migrate:status": "node scripts/prisma.mjs migrate status",
     "db:migrate:deploy": "node scripts/prisma.mjs migrate deploy",
+    "seed:demo-admin": "tsx scripts/seed-demo-admin.ts",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:contracts": "npm run build:contracts && vitest run tests/contracts",

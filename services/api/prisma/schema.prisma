@@ -7,6 +7,70 @@ datasource db {
   schemas  = ["voting"]
 }
 
+// Application accounts are distinct from election-specific chain identities.
+model AppUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String
+  usernameKey  String   @unique
+  passwordHash String
+  fullName     String
+  email        String?
+  phone        String?
+  role         String   @default("USER")
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+  sessions     AppSession[]
+  identities   ElectionVoterIdentity[]
+  auditEntries AdminActivity[] @relation("ActivityActor")
+
+  @@schema("voting")
+}
+
+model AdminActivity {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String   @db.Uuid
+  action    String
+  targetId  String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  actor     AppUser  @relation("ActivityActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@schema("voting")
+}
+
+model AppSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique
+  userId    String   @db.Uuid
+  expiresAt DateTime @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  user      AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@schema("voting")
+}
+
+// Encrypted EOA key material is held only by the API. This is centralized custody.
+model ElectionVoterIdentity {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  chainId         String
+  contractAddress String
+  electionId      String
+  voterAddress    String
+  encryptedKey    String
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  user            AppUser  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([chainId, contractAddress, electionId, userId], map: "ElectionVoterIdentity_election_user_key")
+  @@unique([chainId, contractAddress, electionId, voterAddress], map: "ElectionVoterIdentity_election_address_key")
+  @@index([userId, status])
+  @@schema("voting")
+}
+
 // This table cannot grant voting eligibility or determine an election result.
 model ElectionMetadata {
   id              String   @id @default(uuid()) @db.Uuid

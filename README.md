@@ -1,6 +1,6 @@
 # Blockchain-Based Electronic Voting
 
-HCMUT Master's thesis research prototype. **MVP 2 gasless voting is implemented and locally exercised; milestone acceptance remains incomplete until live Supabase and real MetaMask checks pass.** Updated 2026-10-12. MVP 1 source/ABI/deployment and benchmark evidence are preserved. No public-network deployment, new commit or milestone tag was created in the MVP 2 session. MVP 3-6 remain design only.
+HCMUT Master's thesis research prototype. MVP 1 and MVP 2 remain versioned research baselines. MVP 2.5 adds username/password accounts and backend-managed walletless voting; its additive database migration and local runtime acceptance are pending. Walletless MVP 2.5 is centrally trusted and does not provide ballot anonymity. Anonymous ZK voting remains MVP 3. Updated 2026-10-13.
 
 The baseline uses public synthetic wallets and choices. Smart contracts determine eligibility, one-vote enforcement, lifecycle and results. Database rows cannot authorize a vote or override a tally.
 
@@ -11,6 +11,7 @@ The baseline uses public synthetic wallets and choices. Smart contracts determin
 - Supabase PostgreSQL through Prisma, with a private schema, verified TLS and separate runtime/migration configuration. No Supabase Auth, Realtime or browser database credentials.
 - Immutable Solidity contract with OpenZeppelin owner checks, candidate commitments, batched synthetic-wallet authorization, frozen configuration, timed voting, cancellation and finalization.
 - Versioned GaslessVoting with OpenZeppelin EIP-712 authorization, election nonces and shared direct/sponsored uniqueness; NestJS relayer with durable idempotency, fee budgets, serialized nonce allocation and canonical receipt checks.
+- MVP 2.5 username/password sessions and role checks; server-generated, election-specific EOA identities encrypted at rest and submitted through the existing relayer. No contract change is required. See [walletless architecture and trust assumptions](docs/architecture/walletless-voting.md).
 - Vitest tests, real Hardhat EVM scenarios, Playwright browser workflow, and exploratory 10/100/1000-voter benchmark artifacts.
 
 Node 24.21.0, npm 11.19.0 and all package versions are pinned. See [technology matrix](docs/architecture/technology-stack.md) and the single package-lock.json.
@@ -19,7 +20,7 @@ Node 24.21.0, npm 11.19.0 and all package versions are pinned. See [technology m
 
 Follow [Supabase and deployment instructions](docs/deployment/supabase.md) for credentials, TLS, private-schema roles, migrations and MetaMask. Copy .env.example to an ignored .env and fill only the actual project configuration. There is no local PostgreSQL service or fake production database fallback.
 
-For the gasless demonstration follow [MVP 2 local deployment](docs/deployment/gasless.md): use `npm.cmd run deploy:mvp2`, explicitly configure the new contract and a separate funded relayer, review the additive migration, and enable GASLESS_ENABLED. Voters sign typed data and need zero native balance. The deployment command below retains the MVP 1 baseline.
+For gasless and walletless operation follow [MVP 2 deployment](docs/deployment/gasless.md), then review and apply the additive MVP 2.5 migration. Configure API-only `VOTER_KEY_ENCRYPTION_KEY` before assigning any managed voting identity. Admins still use the contract owner wallet to record eligibility; voters use username/password and do not connect a wallet. `/mvp2-baseline` retains the wallet-based comparison UI.
 
 On this Windows workstation, select the verified portable runtime when the global Node shim fails:
 
@@ -64,6 +65,9 @@ See [MVP 1 evidence and remaining gates](docs/mvps/mvp-1.md) and [actual baselin
 ## Documentation
 
 - [MVP 2 evidence and acceptance gates](docs/mvps/mvp-2.md)
+- [MVP 2.5 walletless implementation and remaining gates](docs/mvps/mvp-2.5.md)
+- [Walletless MVP 2.5 architecture and trust assumptions](docs/architecture/walletless-voting.md)
+- [Implementation checkpoint](docs/IMPLEMENTATION_PROGRESS.md)
 - [Gasless architecture and API](docs/architecture/gasless-voting.md)
 - [MVP 2 paired measurements](docs/benchmarks/mvp-2-gasless.md)
 - [ADR 0008: signed intents and durable sponsorship](docs/architecture/adr/0008-gasless-signed-intents.md)

@@ -5,7 +5,16 @@ import { AppModule, SafeExceptionFilter } from './app.js';
 
 async function main() {
   const app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
-  app.enableCors({ origin: process.env.APP_ORIGIN ?? 'http://localhost:3000', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type', 'x-admin-nonce', 'x-admin-signature', 'idempotency-key'] });
+  const configuredOrigin = new URL(process.env.APP_ORIGIN ?? 'http://localhost:3000');
+  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+  app.enableCors({ origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
+    if (!origin || origin === configuredOrigin.origin) { callback(null, true); return; }
+    try {
+      const requestOrigin = new URL(origin);
+      const isLocalAlias = requestOrigin.protocol === configuredOrigin.protocol && requestOrigin.port === configuredOrigin.port && localHosts.has(requestOrigin.hostname) && localHosts.has(configuredOrigin.hostname);
+      callback(null, isLocalAlias);
+    } catch { callback(null, false); }
+  }, credentials: true, methods: ['GET', 'POST'], allowedHeaders: ['Content-Type', 'x-admin-nonce', 'x-admin-signature', 'idempotency-key'] });
   app.useGlobalFilters(new SafeExceptionFilter());
   app.enableShutdownHooks();
   await app.listen(Number(process.env.API_PORT ?? 3001), process.env.API_HOST ?? '127.0.0.1');

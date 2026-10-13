@@ -9,6 +9,7 @@ else {
     await db.$connect();
     await db.$queryRaw`SELECT 1`;
     await db.electionMetadata.count();
+    await db.adminActivity.count();
     console.log('PASS: NestJS DatabaseService connects with Prisma and the voting schema is accessible. No data was written.');
   } catch { console.error('FAIL: Database connectivity/schema check failed; verify credentials, TLS, network and migration status. Credentials suppressed.'); process.exitCode = 1; }
   finally { await db?.$disconnect(); }

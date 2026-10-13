@@ -11,6 +11,7 @@ import { jsonSafe, manifestSchema } from '../../../packages/shared-types/src/ind
 import { InfrastructureModule } from './infrastructure.js';
 import { RelayerModule } from './relayer/module.js';
 import { RelayError } from './relayer/errors.js';
+import { AuthModule } from './auth.js';
 
 const idSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 @Catch()
@@ -18,18 +19,20 @@ export class SafeExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
     if (error instanceof RelayError) { host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(error.getStatus()).json(error.getResponse()); return; }
     const status = error instanceof ZodError ? 400 : error instanceof HttpException ? error.getStatus() : 503;
-    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: { code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED', message: status === 503 ? 'A required service is unavailable. Retry later.' : 'Check the request, authorization, or election state.' } });
+    const raw = error instanceof HttpException ? error.getResponse() : null;
+    const detail = typeof raw === 'object' && raw !== null && 'code' in raw && 'message' in raw && typeof raw.code === 'string' && /^[A-Z_]{3,48}$/.test(raw.code) && typeof raw.message === 'string' && raw.message.length <= 200 ? { code: raw.code, message: raw.message } : null;
+    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: detail ?? { code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED', message: status === 503 ? 'Dịch vụ tạm thời không khả dụng. Vui lòng thử lại sau.' : 'Yêu cầu không hợp lệ hoặc trạng thái cuộc bầu cử đã thay đổi.' } });
   }
 }
 @Controller('v1')
 export class AppController {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService, @Inject(ElectionsService) private readonly elections: ElectionsService, @Inject(AdminService) private readonly admin: AdminService, @Inject(IndexerService) private readonly indexer: IndexerService) {}
   @Get('health') async health() { await this.db.$queryRaw`SELECT 1`; await this.chain.verifyNetwork(); return { database: 'connected', chain: 'connected' }; }
-  @Get('config') config() {
+  @Get('config') async config() {
     const explorer = process.env.CHAIN_EXPLORER_URL;
     const parsed = explorer ? new URL(z.url().parse(explorer)) : null;
     if (parsed && (parsed.protocol !== 'https:' || parsed.username || parsed.password)) throw new Error('Invalid public explorer configuration');
-    return { chainId: this.chain.config.CHAIN_ID, contractAddress: this.chain.address, confirmations: this.chain.config.CHAIN_CONFIRMATIONS, explorerUrl: parsed?.toString().replace(/\/$/, '') ?? null };
+    return { chainId: this.chain.config.CHAIN_ID, contractAddress: this.chain.address, owner: await this.chain.owner(), confirmations: this.chain.config.CHAIN_CONFIRMATIONS, explorerUrl: parsed?.toString().replace(/\/$/, '') ?? null };
   }
   @Get('elections') async list() { return jsonSafe(await this.elections.list()); }
   @Get('transactions') async transactions() {
@@ -68,5 +71,5 @@ export class AppController {
     return this.indexer.sync();
   }
 }
-@Module({ imports: [InfrastructureModule, RelayerModule], controllers: [AppController], providers: [ElectionsService, AdminService, IndexerService] })
+@Module({ imports: [InfrastructureModule, RelayerModule, AuthModule], controllers: [AppController], providers: [ElectionsService, AdminService, IndexerService] })
 export class AppModule {}
