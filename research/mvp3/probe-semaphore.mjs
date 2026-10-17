@@ -1,0 +1,30 @@
+// Synthetic membership feasibility probe. Never persist the identity secret.
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { performance } from 'node:perf_hooks';
+import { resolve } from 'node:path';
+import { Identity, Group, generateProof, verifyProof } from './semaphore-probe/node_modules/@semaphore-protocol/core/src/index.js';
+import { keccak256, stringToHex } from 'viem';
+
+const base = resolve(import.meta.dirname);
+const ballot = JSON.parse(await readFile(resolve(base, 'probe-output/ballot-public.json'), 'utf8'));
+const identityStart = performance.now();
+const voter = new Identity();
+const others = [new Identity(), new Identity()];
+const identityMs = performance.now() - identityStart;
+const groupStart = performance.now();
+const group = new Group([voter.commitment, ...others.map(item => item.commitment)]);
+const groupMs = performance.now() - groupStart;
+const message = BigInt(ballot.publicSignals[2]);
+const scope = BigInt(keccak256(stringToHex('HCMUT MVP3 LOCAL SYNTHETIC election:1 chain:31337 contract:probe')));
+const proveStart = performance.now();
+const proof = await generateProof(voter, group, message, scope);
+const proveMs = performance.now() - proveStart;
+const verifyStart = performance.now();
+const valid = await verifyProof(proof);
+const verifyMs = performance.now() - verifyStart;
+if (!valid) throw new Error('Semaphore proof failed local verification');
+await mkdir(resolve(base, 'probe-output'), { recursive: true });
+await writeFile(resolve(base, 'probe-output/membership-proof.json'), JSON.stringify(proof));
+await writeFile(resolve(base, 'probe-output/membership-public.json'), JSON.stringify({ root: group.root.toString(), message: message.toString(), scope: scope.toString(), commitments: group.members.map(String), commitmentCount: group.members.length }));
+console.log(JSON.stringify({ valid, identityMs, groupMs, proveMs, verifyMs, depth: proof.merkleTreeDepth, commitmentCount: group.members.length, proofBytes: Buffer.byteLength(JSON.stringify(proof)), root: proof.merkleTreeRoot, message: proof.message, scope: proof.scope }));
+process.exit(0);

@@ -1,89 +1,37 @@
-# Blockchain-Based Electronic Voting
+# Blockchain Voting: MACI thesis prototype
 
-HCMUT Master's thesis research prototype. MVP 1 and MVP 2 remain versioned research baselines. MVP 2.5 adds username/password accounts and backend-managed walletless voting; its additive database migration and local runtime acceptance are pending. Walletless MVP 2.5 is centrally trusted and does not provide ballot anonymity. Anonymous ZK voting remains MVP 3. Updated 2026-10-13.
+This repository's active application is a synthetic, walletless MACI v3 voting prototype for an HCMUT Master's thesis. It uses a Next.js desktop voter/admin interface, a NestJS API, an authorized Supabase PostgreSQL `voting` schema, sponsored on-chain registration and encrypted message submission, and a separate coordinator that produces processing and tally proofs. The chain and proofs determine the accepted tally; database records are projections and published evidence.
 
-The baseline uses public synthetic wallets and choices. Smart contracts determine eligibility, one-vote enforcement, lifecycle and results. Database rows cannot authorize a vote or override a tally.
+The current local application integration completed with two synthetic voters and a verified `[1,1,0]` tally. See [MACI progress and recovery](docs/mvp3/maci/PROGRESS.md), [implementation plan](docs/mvp3/maci/IMPLEMENTATION_PLAN.md), [benchmarks](docs/mvp3/maci/BENCHMARKS.md) and [architecture decision](docs/architecture/adr/0010-maci-mvp3-protocol-migration.md). BSC Testnet deployment has **not** occurred. M0 provenance and security review remain deferred and unapproved.
 
-## Implemented architecture
+The revised academic MVP 3 scope is tracked in [progress](docs/mvp3/PROGRESS.md), [ADR 0011](docs/architecture/adr/0011-mvp3-academic-scope-and-research-isolation.md), [final report](docs/mvp3/FINAL_REPORT.md) and [MVP 4 handoff](docs/mvp4/HANDOFF_FROM_MVP3.md). An isolated [Semaphore + MACI local research PoC](research/mvp3/semaphore-maci/README.md) verified a synthetic tally without changing the main voting protocol. Operator linkability and coordinator visibility are disclosed research limitations. Current local synthetic functional and finality/failure acceptance passed with documented limits. MVP 3 is complete for the academic research scope and MVP 4 is ready to start; neither status approves public deployment or real-electorate use.
 
-- One Next.js/React/TypeScript web app with Vietnamese voter and admin views, Tailwind and an injected-wallet adapter.
-- NestJS/TypeScript API with signed, expiring administrative challenges and Viem blockchain reads/indexing.
-- Supabase PostgreSQL through Prisma, with a private schema, verified TLS and separate runtime/migration configuration. No Supabase Auth, Realtime or browser database credentials.
-- Immutable Solidity contract with OpenZeppelin owner checks, candidate commitments, batched synthetic-wallet authorization, frozen configuration, timed voting, cancellation and finalization.
-- Versioned GaslessVoting with OpenZeppelin EIP-712 authorization, election nonces and shared direct/sponsored uniqueness; NestJS relayer with durable idempotency, fee budgets, serialized nonce allocation and canonical receipt checks.
-- MVP 2.5 username/password sessions and role checks; server-generated, election-specific EOA identities encrypted at rest and submitted through the existing relayer. No contract change is required. See [walletless architecture and trust assumptions](docs/architecture/walletless-voting.md).
-- Vitest tests, real Hardhat EVM scenarios, Playwright browser workflow, and exploratory 10/100/1000-voter benchmark artifacts.
+MVP 1/2/2.5 results remain in `docs/mvps/`, `docs/benchmarks/`, prior deployment records and `research/legacy-mvp1-mvp2/` for thesis comparison. Their code is no longer part of the active build.
 
-Node 24.21.0, npm 11.19.0 and all package versions are pinned. See [technology matrix](docs/architecture/technology-stack.md) and the single package-lock.json.
+## Active source
 
-## Setup and run
+- `apps/voter-web/`: browser credential backup/recovery, joining proof, encrypted command and final results; no voter wallet is required.
+- `services/api/`: account sessions, eligibility, MACI registration and anonymous join/message relays, audit verification/publication.
+- `services/api/prisma/`: clean MACI-first schema and two applied Supabase migrations.
+- `packages/contracts/contracts/`: sponsored MACI registration and open poll-join policy.
+- `scripts/deploy-maci-local.mjs`: explicit synthetic deployment to a persistent Hardhat chain 31337 only.
+- `scripts/maci-coordinator.mjs`: explicit proof generation, on-chain submission and public evidence export.
 
-Follow [Supabase and deployment instructions](docs/deployment/supabase.md) for credentials, TLS, private-schema roles, migrations and MetaMask. Copy .env.example to an ignored .env and fill only the actual project configuration. There is no local PostgreSQL service or fake production database fallback.
+## Local checks
 
-For gasless and walletless operation follow [MVP 2 deployment](docs/deployment/gasless.md), then review and apply the additive MVP 2.5 migration. Configure API-only `VOTER_KEY_ENCRYPTION_KEY` before assigning any managed voting identity. Admins still use the contract owner wallet to record eligibility; voters use username/password and do not connect a wallet. `/mvp2-baseline` retains the wallet-based comparison UI.
-
-On this Windows workstation, select the verified portable runtime when the global Node shim fails:
+Use Node 24.21.0 and npm 11.19.0. On the Windows research workstation, prepend the verified repository-local Node directory to `PATH` when the system shim selects an older version. Keep database, signer and coordinator credentials in ignored environment files; never send them to the browser.
 
 ```powershell
-$env:PATH = "$PWD\.tools\node-v24.21.0-win-x64;$env:PATH"
-npm.cmd ci
-npm.cmd run prisma:generate
 npm.cmd run prisma:validate
 npm.cmd run db:migrate:status
-# Review the additive migration against your existing project first.
-npm.cmd run db:migrate:deploy
 npm.cmd run db:check
-```
-
-Run the following in separate terminals as directed in the deployment guide:
-
-```powershell
-npm.cmd run chain
-npm.cmd run deploy
-# Copy the public deployment address/block into local .env, then:
-npm.cmd run dev:api
-npm.cmd run dev:web
-```
-
-Open http://localhost:3000. Use chain 31337 and separate public development wallets only on the disposable local network. Admin workflow: create, register candidates, sign metadata update, authorize voters, freeze, wait for start, then finalize after the deadline. Voters review their eligibility, select a candidate, confirm wallet/network/gas and inspect the receipt. Local chain confirmation depth should be 1. See the guide for recovery after metadata failures and the optional synthetic seed.
-
-## Verification
-
-```powershell
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd run build
-npm.cmd test
-node node_modules/@playwright/test/cli.js install chromium
-npm.cmd run test:e2e
-npm.cmd run benchmark:mvp1
-npm.cmd run benchmark:mvp2
 ```
 
-See [MVP 1 evidence and remaining gates](docs/mvps/mvp-1.md) and [actual baseline measurements](docs/benchmarks/mvp-1-baseline.md). Browser tests use an injected provider transport against real local transactions and a clearly labeled memory database. They do not establish live Supabase or MetaMask extension compatibility. CI is configured but has not been run on GitHub in this session.
+The existing `.env` points to BSC Testnet. Explicitly override `RPC_URL`, `MACI_RPC_URL`, `CHAIN_ID` and `NEXT_PUBLIC_MACI_RPC_URL` to 31337/loopback for local integration. The MACI local launcher and exact synthetic run evidence are described in [PROGRESS.md](docs/mvp3/maci/PROGRESS.md). Do not reuse ephemeral Hardhat addresses after its process stops.
 
-## Documentation
+## Research limits
 
-- [MVP 2 evidence and acceptance gates](docs/mvps/mvp-2.md)
-- [MVP 2.5 walletless implementation and remaining gates](docs/mvps/mvp-2.5.md)
-- [Walletless MVP 2.5 architecture and trust assumptions](docs/architecture/walletless-voting.md)
-- [Implementation checkpoint](docs/IMPLEMENTATION_PROGRESS.md)
-- [Gasless architecture and API](docs/architecture/gasless-voting.md)
-- [MVP 2 paired measurements](docs/benchmarks/mvp-2-gasless.md)
-- [ADR 0008: signed intents and durable sponsorship](docs/architecture/adr/0008-gasless-signed-intents.md)
-
-| Document | Purpose |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | Engineering, security and milestone boundaries |
-| [System overview](docs/architecture/system-overview.md) | Current and future architecture diagrams |
-| [ADRs](docs/architecture/adr/README.md) | Decisions, including Supabase and Prisma |
-| [API v1](docs/architecture/api-mvp1.md) | Routes, payloads and admin authorization |
-| [Deployment](docs/deployment/supabase.md) | Environment, pooling, migrations and demo |
-| [Threat model](docs/security/threat-model.md) | Assumptions, mitigations and residual risks |
-| [Protocol](docs/protocols/voting-protocol.md) | Public baseline and future anonymous protocol |
-| [Cryptographic compatibility](docs/architecture/cryptography-compatibility.md) | ElGamal/ZK composition gates; no custom crypto |
-| [Roadmap](docs/mvps/roadmap.md) | MVP 1-6 boundaries |
-| [Measurement contract](docs/benchmarks/measurement-spec.md) | Reproducibility and metric definitions |
-| [Initialization report](docs/initialization-report.md) | Historical pre-implementation inspection |
-
-Future encryption uses a fresh election-specific ElGamal key, initially a single holder who can decrypt individual ciphertexts. Anonymous credentials and homomorphic tally belong to MVP 3; public datasets and an independent verifier belong to MVP 4. Do not infer privacy from blockchain immutability or start later milestones without an explicit instruction.
+Use synthetic accounts and test assets only. The issuer and coordinator are trusted prototype roles; the coordinator can decrypt individual commands. MACI artifact ceremony provenance, dependency advisories, operational key separation and BSC deployment compatibility need further review. This prototype does not claim coercion resistance, protection from a compromised client, or privacy against a colluding issuer and coordinator. See [threat model](docs/security/threat-model.md) and [artifact provenance](docs/mvp3/maci/ARTIFACT_PROVENANCE.md).

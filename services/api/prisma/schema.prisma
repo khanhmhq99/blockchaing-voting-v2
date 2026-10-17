@@ -21,8 +21,9 @@ model AppUser {
   createdAt    DateTime @default(now()) @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @db.Timestamptz(6)
   sessions     AppSession[]
-  identities   ElectionVoterIdentity[]
   auditEntries AdminActivity[] @relation("ActivityActor")
+  maciEligibilities MaciEligibility[]
+  maciRegistrations MaciRegistration[]
 
   @@schema("voting")
 }
@@ -52,204 +53,190 @@ model AppSession {
   @@schema("voting")
 }
 
-// Encrypted EOA key material is held only by the API. This is centralized custody.
-model ElectionVoterIdentity {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @db.Uuid
-  chainId         String
-  contractAddress String
-  electionId      String
-  voterAddress    String
-  encryptedKey    String
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now()) @db.Timestamptz(6)
-  user            AppUser  @relation(fields: [userId], references: [id], onDelete: Restrict)
+// MACI metadata and identity-side issuance records. Encrypted ballot messages never belong here.
+model MaciElection {
+  id                  String @id @default(uuid()) @db.Uuid
+  chainId             String
+  maciAddress         String
+  registrationAddress String
+  pollAddress         String
+  pollId              String
+  deploymentBlock     String
+  title               String
+  candidates          Json
+  coordinatorKeyX     String
+  coordinatorKeyY     String
+  startTimestamp      String
+  endTimestamp        String
+  voteOptions         Int
+  protocolVersion     String @default("maci-v3.0.0-full-v1")
+  status              String @default("REGISTRATION")
+  createdAt           DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @db.Timestamptz(6)
+  eligibilities       MaciEligibility[]
+  registrations       MaciRegistration[]
+  auditRecord          MaciAuditRecord?
+  coordinatorRuns      MaciCoordinatorRun[]
+  proofSubmissions     MaciProofSubmission[]
 
-  @@unique([chainId, contractAddress, electionId, userId], map: "ElectionVoterIdentity_election_user_key")
-  @@unique([chainId, contractAddress, electionId, voterAddress], map: "ElectionVoterIdentity_election_address_key")
-  @@index([userId, status])
+  @@unique([chainId, maciAddress])
+  @@unique([chainId, pollAddress])
   @@schema("voting")
 }
 
-// This table cannot grant voting eligibility or determine an election result.
-model ElectionMetadata {
-  id              String   @id @default(uuid()) @db.Uuid
-  chainId         String
-  contractAddress String
-  electionId      String
-  manifestHash    String
-  title           String
-  description     String
-  createdAt       DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
-  candidates      CandidateProfile[]
+model MaciEligibility {
+  id         String @id @default(uuid()) @db.Uuid
+  electionId String @db.Uuid
+  userId     String @db.Uuid
+  status     String @default("ELIGIBLE")
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  election   MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+  user       AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
 
-  @@unique([chainId, contractAddress, electionId])
+  @@unique([electionId, userId])
   @@schema("voting")
 }
 
-model CandidateProfile {
-  id          String @id @default(uuid()) @db.Uuid
-  metadataId  String @db.Uuid
-  candidateId Int
-  name        String
-  biography   String
-  imageUrl    String?
-  election    ElectionMetadata @relation(fields: [metadataId], references: [id], onDelete: Restrict)
-
-  @@unique([metadataId, candidateId])
-  @@schema("voting")
-}
-
-// Rebuildable projection only. Live vote status is always read from the chain.
-model IndexedEvent {
+model MaciRegistration {
   id              String @id @default(uuid()) @db.Uuid
-  chainId         String
-  contractAddress String
-  blockNumber     BigInt
-  blockHash       String
-  transactionHash String
-  logIndex        Int
-  eventName       String
-  payload         Json
-  syncStatus      String @default("confirmed")
-
-  @@unique([chainId, contractAddress, transactionHash, logIndex])
-  @@index([chainId, contractAddress, blockNumber])
-  @@schema("voting")
-}
-
-model BlockchainTransaction {
-  id              String @id @default(uuid()) @db.Uuid
-  chainId         String
-  contractAddress String
-  transactionHash String
-  electionId      String?
-  operation       String
-  status          String
-  blockNumber     BigInt
-  blockHash       String
-  gasUsed         String
-  effectiveGasPrice String
-  observedAt      DateTime @default(now()) @db.Timestamptz(6)
-
-  @@unique([chainId, transactionHash])
-  @@index([chainId, contractAddress, electionId])
-  @@schema("voting")
-}
-
-model ChainCheckpoint {
-  id              String @id
-  blockNumber     BigInt
-  blockHash       String
-  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
-
-  @@schema("voting")
-}
-
-model BenchmarkRun {
-  id        String @id
-  manifest  Json
-  summary   Json
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  measurements BenchmarkMeasurement[]
-
-  @@schema("voting")
-}
-
-model BenchmarkMeasurement {
-  id               String @id @default(uuid()) @db.Uuid
-  runId            String
-  operation        String
-  transactionHash  String
-  gasUsed          String
-  effectiveGasPrice String
-  confirmationMs   Float
-  success          Boolean
-  errorCode        String?
-  run              BenchmarkRun @relation(fields: [runId], references: [id], onDelete: Restrict)
-
-  @@unique([runId, transactionHash])
-  @@index([runId, operation])
-  @@schema("voting")
-}
-
-// Durable synthetic public-ballot operations; never voter private keys.
-model GaslessVoteRequest {
-  id              String @id @default(uuid()) @db.Uuid
-  chainId         String
-  contractAddress String
-  electionId      String
-  voterAddress    String
-  candidateId     String
-  manifestHash    String
-  nonce           String
+  electionId      String @db.Uuid
+  userId          String @db.Uuid
+  publicKeyX      String
+  publicKeyY      String
+  ticket          String @unique
   deadline        String
-  intentHash      String @unique
-  activeSlot      String? @unique
-  signature       String?
-  status          String
-  errorCode       String?
-  validationMs    Float
+  issuerSignature String
+  status          String @default("ISSUED")
+  transactionHash String?
+  rawTransaction  String?
+  calldataHash    String?
+  nonce           Int?
+  blockNumber     BigInt?
+  blockHash       String?
   createdAt       DateTime @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @db.Timestamptz(6)
-  confirmedAt     DateTime? @db.Timestamptz(6)
-  transaction     RelayerTransaction?
-  history         GaslessRequestHistory[]
+  election        MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+  user            AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
 
-  @@index([chainId, contractAddress, status, createdAt])
-  @@index([chainId, contractAddress, electionId, voterAddress])
+  @@unique([electionId, userId])
+  @@unique([electionId, publicKeyX, publicKeyY])
+  @@index([electionId, status])
   @@schema("voting")
 }
 
-model GaslessRequestHistory {
-  id        String @id @default(uuid()) @db.Uuid
-  requestId String @db.Uuid
-  status    String
-  errorCode String?
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  request   GaslessVoteRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
-
-  @@index([requestId, createdAt])
-  @@schema("voting")
-}
-
-model RelayerTransaction {
+// Public encrypted messages only. No user/account/session foreign key is permitted.
+model MaciEncryptedSubmission {
   id                String @id @default(uuid()) @db.Uuid
-  requestId         String @unique @db.Uuid
   chainId           String
-  contractAddress   String
-  relayerAddress    String
-  transactionHash   String @unique
-  nonce             Int
-  gasLimit          String
-  gasPrice          String
-  reservedFeeWei    String
+  pollAddress       String
+  messageDigest     String @unique
+  messageData       Json
+  encryptionKeyX    String
+  encryptionKeyY    String
+  status            String @default("PREPARED")
+  transactionHash   String?
   rawTransaction    String?
-  calldataHash      String
-  status            String
-  gasUsed           String?
-  effectiveGasPrice String?
-  transactionFee    String?
+  calldataHash      String?
+  nonce             Int?
   blockNumber       BigInt?
   blockHash         String?
-  queueMs           Float
-  submissionMs      Float?
+  gasUsed           String?
+  errorCode         String?
   createdAt         DateTime @default(now()) @db.Timestamptz(6)
-  submittedAt       DateTime? @db.Timestamptz(6)
-  confirmedAt       DateTime? @db.Timestamptz(6)
-  request           GaslessVoteRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(6)
 
-  @@unique([chainId, relayerAddress, nonce])
-  @@index([chainId, relayerAddress, status])
+  @@index([chainId, pollAddress, status, createdAt])
   @@schema("voting")
 }
 
-model RelayerBudget {
-  id              String @id
-  contractAddress String
-  reservedWei     Decimal @default(0) @db.Decimal(78, 0)
+// Anonymous poll-join proof submission. The registration issuer cannot query this by account.
+model MaciPollJoinSubmission {
+  id              String @id @default(uuid()) @db.Uuid
+  chainId         String
+  pollAddress     String
+  joinDigest      String @unique
+  publicKeyX      String
+  publicKeyY      String
+  nullifier       String
+  status          String @default("PREPARED")
+  transactionHash String?
+  rawTransaction  String?
+  calldataHash    String?
+  nonce           Int?
+  pollStateIndex  String?
+  blockNumber     BigInt?
+  blockHash       String?
+  errorCode       String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @db.Timestamptz(6)
 
+  @@unique([chainId, pollAddress, nullifier])
+  @@unique([chainId, pollAddress, publicKeyX, publicKeyY])
+  @@index([chainId, pollAddress, status, createdAt])
+  @@schema("voting")
+}
+
+// Deliberately published aggregate and proof evidence, without private circuit inputs.
+model MaciAuditRecord {
+  id            String @id @default(uuid()) @db.Uuid
+  electionId    String @unique @db.Uuid
+  manifestJson  String
+  eventsNdjson  String
+  proofsJson    String
+  tallyJson     String
+  snapshotBlock BigInt
+  snapshotHash  String
+  verifiedAt    DateTime @default(now()) @db.Timestamptz(6)
+  election      MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+
+  @@schema("voting")
+}
+
+// Operational metadata only; private coordinator witnesses stay outside the database.
+model MaciCoordinatorRun {
+  id             String @id @default(uuid()) @db.Uuid
+  electionId     String @db.Uuid
+  runId          String @unique
+  status         String @default("STARTED")
+  processingCount Int @default(0)
+  tallyCount     Int @default(0)
+  snapshotBlock  BigInt?
+  errorCode      String?
+  startedAt      DateTime @default(now()) @db.Timestamptz(6)
+  completedAt    DateTime? @db.Timestamptz(6)
+  election       MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+
+  @@index([electionId, startedAt])
+  @@schema("voting")
+}
+
+// Public proof transaction references; full public proofs belong in MaciAuditRecord.
+model MaciProofSubmission {
+  id              String @id @default(uuid()) @db.Uuid
+  electionId      String @db.Uuid
+  kind            String
+  batchIndex      Int
+  transactionHash String @unique
+  blockNumber     BigInt
+  gasUsed         String
+  status          String @default("INCLUDED")
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  election        MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+
+  @@unique([electionId, kind, batchIndex])
+  @@index([electionId, kind])
+  @@schema("voting")
+}
+
+// Reorg-aware public scan checkpoint; no voter identity reference.
+model MaciChainCheckpoint {
+  id          String @id @default(uuid()) @db.Uuid
+  chainId     String
+  pollAddress String
+  blockNumber BigInt
+  blockHash   String
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([chainId, pollAddress])
   @@schema("voting")
 }

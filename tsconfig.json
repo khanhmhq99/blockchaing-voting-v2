@@ -11,6 +11,6 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["services/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "*.config.ts"],
+  "include": ["services/**/*.ts", "packages/**/*.ts", "scripts/check-database.ts", "scripts/seed-maci-synthetic-admin.ts", "*.config.ts"],
   "exclude": ["node_modules", "dist", "apps", "**/generated/**"]
 }

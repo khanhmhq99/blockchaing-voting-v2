@@ -5,10 +5,10 @@ import { api, type AppUser } from '../auth-client';
 
 export default function LoginPage() {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [showPassword, setShowPassword] = useState(false); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<AppUser>('/auth/me').then(user => window.location.replace(user.role === 'ADMIN' ? '/admin' : '/dashboard')).catch(() => undefined); }, []);
+  useEffect(() => { void api<AppUser>('/auth/me').then(user => window.location.replace(user.role === 'ADMIN' ? '/admin/maci' : '/maci')).catch(() => undefined); }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage('');
-    try { const { user } = await api<{ user: AppUser }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }); window.location.assign(user.role === 'ADMIN' ? '/admin' : '/dashboard'); }
+    try { const { user } = await api<{ user: AppUser }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }); window.location.assign(user.role === 'ADMIN' ? '/admin/maci' : '/maci'); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Đăng nhập thất bại.'); }
     finally { setBusy(false); }
   }

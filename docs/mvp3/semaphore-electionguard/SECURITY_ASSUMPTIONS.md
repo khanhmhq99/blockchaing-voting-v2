@@ -1,0 +1,25 @@
+# Security assumptions and probe coverage
+
+Adversaries include an ineligible submitter, eligible malicious voter, dishonest issuer/relayer/operator, compromised guardian, malicious record publisher, archive withholder and observer correlating authentication/submission metadata. Assumptions: the issuer applies eligibility once per person/election; voter client and entropy are honest; selected proof artifacts and implementations are sound; at least two genuinely independent guardians cooperate; a canonical chain/RPC view and public ballot archive are available. The local script establishes none of the real-world organizational assumptions.
+
+| Probe | Expected enforcement | Actual local result | Location and residual risk |
+| --- | --- | --- | --- |
+| Non-member | Reject proof | OBSERVED: generation against group failed | Off-chain library; a forged proof point also failed Solidity verification |
+| Duplicate identity authorization | Reject second issuance | NOT TESTED | Issuer/Supabase policy absent; Semaphore nullifier does not prevent Sybil issuance |
+| Reused nullifier | Reject atomic second acceptance | OBSERVED | On-chain research registry mapping; separate contracts/elections require scoped policy |
+| Modified ciphertext bytes | Reject mismatched digest | OBSERVED swapped public ballot digest and changed public file byte rejected | On-chain binding and local readback snapshot; authenticated BSC archive verification remains |
+| Modified ballot validity evidence | Reject | OBSERVED altered public ballot proof rejected at ballot validity check | ElectionGuard verifier off-chain only; on-chain registry can accept digest of invalid ballot |
+| Wrong election ID | Reject scope/message mismatch | Inferred from verified contract formula; NOT separately executed | On-chain proposed rule, but issuer/election lifecycle policy incomplete |
+| Wrong public key or manifest | Reject native validity/context | OBSERVED altered election scope and externally modified joint public key rejected | ElectionGuard off-chain checks and digest binding; no on-chain validity |
+| Added ballot | Detect accepted-set mismatch | Local snapshot length fixed at three; external added-file attack NOT TESTED | Auditor must compare authenticated chain digest order to published record |
+| Removed ballot | Detect accepted-set mismatch | OBSERVED: native `verify_aggregation` rejected omitted input ballot; separate verifier rejected omitted public file | Persistent authenticated chain checkpoint not tested |
+| Duplicate ballot | Reject repeated nullifier or duplicate public ballot ID | OBSERVED same proof rejected on-chain; duplicate public ballot record rejected off-chain | Another issued identity could submit same ciphertext unless ballot-digest uniqueness is separately defined |
+| Invalid candidate selection | Reject overvote proof | NOT TESTED; valid one-of-three ballots passed | ElectionGuard native off-chain check only |
+| Incorrect homomorphic tally | Reject recomputation | OBSERVED valid aggregation passed | Separate public verifier recomputes from three ballots; external ciphertext-tally mutation not tested |
+| Forged decryption share | Reject proof | OBSERVED in-memory and externally modified compensated share rejected | Separate public verifier uses pinned upstream proof equation; independent review remains |
+| Insufficient quorum | Reject decryption | OBSERVED guardians A and B separately fail; all three 2-of-3 pairs return `[1,2,0]` | Native mediator; one parent/host can command all three worker processes |
+| Modified final result | Reject proof/tally relation | Source `verify_decryption` accepted changed integer; separate public verifier rejected in-memory and externally modified records | Research verifier compares complete recomputed result; independent review remains |
+| Compromised guardian simulation | One holder cannot decrypt tally | Distinct worker processes, private accessor denied and single-guardian quorum failures OBSERVED; actual compromise NOT TESTED | One host/parent controls all workers; separate operator custody remains absent |
+| Authentication/submission metadata correlation | Reduce linkage | NOT TESTED | Current issuer/relayer/network logs could link identities; no anonymity claim against a global observer |
+
+`verify_ballot` returned true for all three synthetic cast ballots, and the on-chain registry checked exact Semaphore message/scope and nullifier. The ElectionGuard reference `verify_decryption` succeeds for 3-of-3 direct shares but throws for the 2-of-3 compensated share; it also accepts a mutated final tally integer. A separate public-record research verifier recomputed the 2-of-3 tally without private keys and rejected forged share, changed count and omitted ballot in externally modified records. That evidence is partial until independent review and an authenticated complete chain accepted set. The registry cannot prevent an invalid but correctly committed ballot from consuming a voting right. No coercion resistance, receipt-freeness, honest identity issuance, endpoint compromise protection or independent trustee governance is claimed.

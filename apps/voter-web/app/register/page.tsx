@@ -5,7 +5,7 @@ import { api, type AppUser } from '../auth-client';
 
 export default function RegisterPage() {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [fullName, setFullName] = useState(''); const [email, setEmail] = useState(''); const [phone, setPhone] = useState(''); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<AppUser>('/auth/me').then(user => window.location.replace(user.role === 'ADMIN' ? '/admin' : '/dashboard')).catch(() => undefined); }, []);
+  useEffect(() => { void api<AppUser>('/auth/me').then(user => window.location.replace(user.role === 'ADMIN' ? '/admin/maci' : '/maci')).catch(() => undefined); }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage('');
     try { await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, password, fullName, email, phone }) }); window.location.assign('/login?registered=1'); }

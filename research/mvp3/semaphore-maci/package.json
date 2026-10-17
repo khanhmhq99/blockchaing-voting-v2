@@ -1,0 +1,25 @@
+{
+  "name": "semaphore-maci-research",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24.15 <25"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "compile": "node compile.mjs",
+    "probe": "node run-local.cjs"
+  },
+  "dependencies": {
+    "@maci-protocol/contracts": "3.0.0",
+    "@maci-protocol/crypto": "3.0.0",
+    "@maci-protocol/domainobjs": "3.0.0",
+    "@maci-protocol/sdk": "3.0.0",
+    "@semaphore-protocol/contracts": "4.14.4",
+    "@semaphore-protocol/core": "4.14.4",
+    "ethers": "6.15.0",
+    "hardhat": "2.25.0",
+    "solc": "0.8.37"
+  }
+}

@@ -1,5 +1,7 @@
 # Six-MVP roadmap
 
+> Current scope (2026-10-17): [ADR 0011](../architecture/adr/0011-mvp3-academic-scope-and-research-isolation.md) supersedes the historical row for MVP 3. The active application uses MACI v3; Semaphore + MACI is an isolated research PoC. MVP 4 prepares monitoring, auditing and an independent verifier as specified in the [handoff](../mvp4/HANDOFF_FROM_MVP3.md). The dated roadmap below is preserved for thesis history.
+
 Update 2026-10-12: MVP 1 has been explicitly authorized and locally implemented with Supabase PostgreSQL/Prisma. See [current evidence](mvp-1.md); live database and real wallet acceptance remain pending. MVP 2-6 are not authorized for implementation.
 
 Status: MVP 1 implementation authorized; completion gates remain open. Milestones 2-6 are plans only. Do not automatically begin any subsequent milestone.

@@ -1,0 +1,8 @@
+# Downloaded upstream source, local dependencies, and generated synthetic evidence.
+davinci-circom/
+semaphore-probe/
+probe-output/
+ballot-verifier.sol
+ceremony/
+# DAVINCI-derived patch stays local until the rightsholder grants distribution rights.
+ballot-public-signals.patch

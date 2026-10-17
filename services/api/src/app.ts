@@ -1,75 +1,33 @@
 import 'reflect-metadata';
-import { Body, Catch, Controller, Get, Headers, HttpException, Inject, Module, Param, Post, Query, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
-import { z, ZodError } from 'zod';
-import type { Address } from 'viem';
+import { Catch, Controller, Get, HttpException, Inject, Module, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
+import { ZodError } from 'zod';
 import { DatabaseService } from './database.js';
 import { ChainService } from './chain.js';
-import { ElectionsService } from './elections.js';
-import { AdminService } from './admin.js';
-import { IndexerService } from './indexer.js';
-import { jsonSafe, manifestSchema } from '../../../packages/shared-types/src/index.js';
 import { InfrastructureModule } from './infrastructure.js';
-import { RelayerModule } from './relayer/module.js';
-import { RelayError } from './relayer/errors.js';
 import { AuthModule } from './auth.js';
+import { MaciModule } from './maci/module.js';
 
-const idSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 @Catch()
 export class SafeExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
-    if (error instanceof RelayError) { host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(error.getStatus()).json(error.getResponse()); return; }
     const status = error instanceof ZodError ? 400 : error instanceof HttpException ? error.getStatus() : 503;
     const raw = error instanceof HttpException ? error.getResponse() : null;
-    const detail = typeof raw === 'object' && raw !== null && 'code' in raw && 'message' in raw && typeof raw.code === 'string' && /^[A-Z_]{3,48}$/.test(raw.code) && typeof raw.message === 'string' && raw.message.length <= 200 ? { code: raw.code, message: raw.message } : null;
-    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: detail ?? { code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED', message: status === 503 ? 'Dịch vụ tạm thời không khả dụng. Vui lòng thử lại sau.' : 'Yêu cầu không hợp lệ hoặc trạng thái cuộc bầu cử đã thay đổi.' } });
+    const detail = typeof raw === 'object' && raw !== null && 'code' in raw && 'message' in raw && typeof raw.code === 'string' && /^[A-Z_]{3,48}$/.test(raw.code) && typeof raw.message === 'string' && raw.message.length <= 200
+      ? { code: raw.code, message: raw.message }
+      : null;
+    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: detail ?? {
+      code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED',
+      message: status === 503 ? 'Service is temporarily unavailable.' : 'The request is invalid or the election state changed.',
+    } });
   }
 }
+
 @Controller('v1')
 export class AppController {
-  constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService, @Inject(ElectionsService) private readonly elections: ElectionsService, @Inject(AdminService) private readonly admin: AdminService, @Inject(IndexerService) private readonly indexer: IndexerService) {}
+  constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService) {}
   @Get('health') async health() { await this.db.$queryRaw`SELECT 1`; await this.chain.verifyNetwork(); return { database: 'connected', chain: 'connected' }; }
-  @Get('config') async config() {
-    const explorer = process.env.CHAIN_EXPLORER_URL;
-    const parsed = explorer ? new URL(z.url().parse(explorer)) : null;
-    if (parsed && (parsed.protocol !== 'https:' || parsed.username || parsed.password)) throw new Error('Invalid public explorer configuration');
-    return { chainId: this.chain.config.CHAIN_ID, contractAddress: this.chain.address, owner: await this.chain.owner(), confirmations: this.chain.config.CHAIN_CONFIRMATIONS, explorerUrl: parsed?.toString().replace(/\/$/, '') ?? null };
-  }
-  @Get('elections') async list() { return jsonSafe(await this.elections.list()); }
-  @Get('transactions') async transactions() {
-    return jsonSafe(await this.db.blockchainTransaction.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address }, take: 100, orderBy: { observedAt: 'desc' } }));
-  }
-  @Get('benchmarks') async benchmarks() {
-    return jsonSafe(await this.db.benchmarkRun.findMany({ take: 20, orderBy: { createdAt: 'desc' } }));
-  }
-  @Get('elections/:id/results') async results(@Param('id') id: string) {
-    const election = await this.chain.election(BigInt(idSchema.parse(id)));
-    return jsonSafe({ source: election.source, counts: election.counts, totalVotes: election.totalVotes, eligibleCount: election.eligibleCount, finalized: election.finalized, state: election.state, blockNumber: election.blockNumber, blockHash: election.blockHash });
-  }
-  @Get('elections/:id/candidates') async candidates(@Param('id') id: string) {
-    const election = await this.elections.get(idSchema.parse(id));
-    return { candidates: election.metadata?.candidates ?? null, metadataStatus: election.metadataStatus };
-  }
-  @Get('elections/:id/voters/:address') async voter(@Param('id') id: string, @Param('address') address: string) {
-    const election = await this.chain.election(BigInt(idSchema.parse(id)), z.string().regex(/^0x[0-9a-fA-F]{40}$/).parse(address) as Address);
-    return jsonSafe({ eligible: election.eligible, hasVoted: election.hasVoted, source: 'blockchain', blockNumber: election.blockNumber, blockHash: election.blockHash });
-  }
-  @Get('elections/:id') async election(@Param('id') id: string, @Query('voter') voter?: string) {
-    const address = voter ? z.string().regex(/^0x[0-9a-fA-F]{40}$/).parse(voter) as Address : undefined;
-    return jsonSafe(await this.elections.get(idSchema.parse(id), address));
-  }
-  @Post('admin/challenge') challenge(@Body() body: unknown) {
-    const { action, digest } = z.object({ action: z.enum(['metadata', 'index']), digest: z.string().regex(/^0x[0-9a-f]{64}$/) }).strict().parse(body);
-    return this.admin.challenge(action, digest);
-  }
-  @Post('admin/elections/:id/metadata') async save(@Param('id') id: string, @Body() body: unknown, @Headers('x-admin-nonce') nonce?: string, @Headers('x-admin-signature') signature?: string) {
-    const payload = { electionId: idSchema.parse(id), manifest: manifestSchema.parse(body) };
-    await this.admin.authorize('metadata', payload, nonce, signature);
-    return this.elections.save(payload.electionId, payload.manifest);
-  }
-  @Post('admin/index') async sync(@Headers('x-admin-nonce') nonce?: string, @Headers('x-admin-signature') signature?: string) {
-    await this.admin.authorize('index', {}, nonce, signature);
-    return this.indexer.sync();
-  }
+  @Get('config') async config() { await this.chain.verifyNetwork(); return { protocol: 'maci-v3.0.0-full-v1', chainId: this.chain.config.CHAIN_ID, confirmations: this.chain.config.CHAIN_CONFIRMATIONS }; }
 }
-@Module({ imports: [InfrastructureModule, RelayerModule, AuthModule], controllers: [AppController], providers: [ElectionsService, AdminService, IndexerService] })
+
+@Module({ imports: [InfrastructureModule, AuthModule, MaciModule], controllers: [AppController] })
 export class AppModule {}

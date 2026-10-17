@@ -22,5 +22,5 @@ export function databaseOptions(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export function chainConfig(env: NodeJS.ProcessEnv = process.env) {
-  return z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().positive(), VOTING_CONTRACT_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/), DEPLOYMENT_BLOCK: z.string().regex(/^\d+$/), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
+  return z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().positive(), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
 }

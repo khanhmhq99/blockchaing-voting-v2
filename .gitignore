@@ -22,6 +22,7 @@ packages/contracts/cache/
 # Local cryptographic witnesses and setup artifacts.
 *.wtns
 *.zkey
+!apps/voter-web/public/maci/v3.0.0/polljoining_14.zkey
 *.ptau
 
 # Python and local tools.

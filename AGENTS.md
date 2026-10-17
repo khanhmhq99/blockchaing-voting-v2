@@ -2,6 +2,8 @@
 
 ## Purpose and current scope
 
+On 2026-10-14 the owner explicitly authorized MVP 3 implementation using MACI, superseding the earlier MVP 2 stop boundary and the DAVINCI/Semaphore-specific MVP 3 cryptographic plan below. Resume from `docs/mvp3/maci/PROGRESS.md` and `docs/mvp3/maci/IMPLEMENTATION_PLAN.md`. Preserve all prior source, ABI, deployments, research and evidence. No mainnet, real electorate, destructive managed-database migration or automatic trusted setup ceremony is authorized. BSC Testnet deployment is conditional on the MACI license, artifact provenance, local proof and compatibility gates in the current plan.
+
 This is an HCMUT Master's thesis research prototype for blockchain-based electronic voting. Prioritize correctness, security and privacy, independent verifiability, reproducibility, maintainability, performance, then development speed.
 
 The owner explicitly authorized MVP 2 gasless implementation and local blockchain deployment on 2026-10-12, superseding the earlier MVP 1 stop boundary. Preserve MVP 1 source, ABI, deployments and benchmark evidence. Acceptance gates are recorded in docs/mvps/mvp-1.md and docs/mvps/mvp-2.md; live Supabase and real MetaMask acceptance remain separate gates. Finish MVP 2 verification and documentation, then stop. Do not start MVP 3, deploy to mainnet, spend real cryptocurrency or perform destructive managed-database migrations.

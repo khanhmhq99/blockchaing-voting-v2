@@ -14,5 +14,8 @@ The subsequent explicit MVP 2 request authorizes signed gasless voting and local
 | [0006](0006-elgamal-aggregate-tally.md) | Accepted approach; composition unvalidated | ElGamal aggregate tally, single holder initially, threshold upgrade path |
 | [0007](0007-supabase-prisma-mvp1.md) | Accepted; live database verification pending | Supabase PostgreSQL, Prisma, npm and executable MVP 1 lifecycle |
 | [0008](0008-gasless-signed-intents.md) | Implemented locally; managed acceptance pending | Direct EIP-712, immutable MVP 2 deployment, durable relayer and conservative sponsorship |
+| [0009](0009-mvp3-encrypted-ballot-proof-composition.md) | Proposed; architecture decision required | Separate membership and ballot-validity proofs with authenticated accepted-record binding |
+| [0010](0010-maci-mvp3-protocol-migration.md) | MACI product direction accepted; integration gates open | Versioned MACI replaces DAVINCI/Semaphore for new MVP 3 elections; preserve historical evidence |
+| [0011](0011-mvp3-academic-scope-and-research-isolation.md) | Accepted academic scope; acceptance pending | MACI remains the main app; Semaphore + MACI remains isolated research; operator/coordinator limits are disclosed |
 
 New ADRs must include context, considered options, decision, trade-offs, security implications, research implications, status, and evidence required to revisit the decision.

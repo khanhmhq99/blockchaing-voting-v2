@@ -1,0 +1,49 @@
+{
+  "selectedRound": 6551994,
+  "chainHash": "8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce",
+  "publicKey": "868f005eb8e6e4ca0a47c8a77ceaa5309a47978a7c71bc5cce96366b5d7a569937c529eeda66c7293784a9402801af31",
+  "checkedAtUtc": "2026-10-14T15:14:27.059Z",
+  "verifier": "drand-client@1.4.2, BLS verification enabled",
+  "results": [
+    {
+      "relay": "https://api.drand.sh",
+      "info": {
+        "public_key": "868f005eb8e6e4ca0a47c8a77ceaa5309a47978a7c71bc5cce96366b5d7a569937c529eeda66c7293784a9402801af31",
+        "period": 30,
+        "genesis_time": 1595431050,
+        "hash": "8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce",
+        "groupHash": "176f93498eac9ca337150b46d21dd58673ea4e3581185f869672e59fa4cb390a",
+        "schemeID": "pedersen-bls-chained",
+        "metadata": {
+          "beaconID": "default"
+        }
+      },
+      "beacon": {
+        "round": 6551994,
+        "randomness": "3cbd1bce0ee8d8dc15c288de01434b61987fc5f47e1a4fda43d98e2fbcdb9e66",
+        "signature": "91ac84b7cf0441fe25d43a691dc17974159985a240bf8d091c8d4e4f0181ce37b8366a1e51af6022f8dc094d4cdc9585044a131428938bdc9fd4a0fad0b945882522972d09961c6ea689445208ccc4eba0d0bf47bcdb0feb4a6dfe23790addb1",
+        "previous_signature": "8e136fb373ad1e74211f209998a916e7ab11a145e7d90a91b5af364cc07eb4af403c8fc64250e745ce6ce2a7bc6e9d351654b3506dd55b6d2e879762dc0f85ecfa17dc0daf142c8d922d4b0a1fe997aff82027a157d1d59bbd14f9cca95b31e5"
+      }
+    },
+    {
+      "relay": "https://drand.cloudflare.com",
+      "info": {
+        "public_key": "868f005eb8e6e4ca0a47c8a77ceaa5309a47978a7c71bc5cce96366b5d7a569937c529eeda66c7293784a9402801af31",
+        "period": 30,
+        "genesis_time": 1595431050,
+        "hash": "8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce",
+        "groupHash": "176f93498eac9ca337150b46d21dd58673ea4e3581185f869672e59fa4cb390a",
+        "schemeID": "pedersen-bls-chained",
+        "metadata": {
+          "beaconID": "default"
+        }
+      },
+      "beacon": {
+        "round": 6551994,
+        "signature": "91ac84b7cf0441fe25d43a691dc17974159985a240bf8d091c8d4e4f0181ce37b8366a1e51af6022f8dc094d4cdc9585044a131428938bdc9fd4a0fad0b945882522972d09961c6ea689445208ccc4eba0d0bf47bcdb0feb4a6dfe23790addb1",
+        "previous_signature": "8e136fb373ad1e74211f209998a916e7ab11a145e7d90a91b5af364cc07eb4af403c8fc64250e745ce6ce2a7bc6e9d351654b3506dd55b6d2e879762dc0f85ecfa17dc0daf142c8d922d4b0a1fe997aff82027a157d1d59bbd14f9cca95b31e5",
+        "randomness": "3cbd1bce0ee8d8dc15c288de01434b61987fc5f47e1a4fda43d98e2fbcdb9e66"
+      }
+    }
+  ]
+}

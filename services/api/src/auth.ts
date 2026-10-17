@@ -1,18 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { Body, Controller, Get, Headers, Inject, Injectable, Post, UnauthorizedException, ForbiddenException, ConflictException, BadRequestException, Module, Param, Res } from '@nestjs/common';
-import { hashTypedData, type Address, type Hex } from 'viem';
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { z } from 'zod';
 import { DatabaseService } from './database.js';
-import { ChainService } from './chain.js';
-import { RelayerService } from './relayer/service.js';
 import { InfrastructureModule } from './infrastructure.js';
-import { RelayerModule } from './relayer/module.js';
-import { ElectionsService } from './elections.js';
-import { gaslessAbi } from '../../../packages/contracts/src/gasless-abi.js';
-import { intentSchema, votingTypedData } from '../../../packages/shared-types/src/gasless.js';
-import { jsonSafe } from '../../../packages/shared-types/src/index.js';
-import type { ElectionVoterIdentity } from '@prisma/client';
 
 const scrypt = (password: string, salt: string, length: number, options: { N?: number; r?: number; p?: number; maxmem?: number } = {}) => new Promise<Buffer>((resolve, reject) => {
   scryptCallback(password, salt, length, options, (error, key) => error ? reject(error) : resolve(key));
@@ -36,28 +26,10 @@ async function verifyPassword(password: string, encoded: string) {
     return expected.length === actual.length && timingSafeEqual(expected, actual);
   } catch { return false; }
 }
-function encryptionKey() {
-  const configured = process.env.VOTER_KEY_ENCRYPTION_KEY;
-  if (!configured || !/^[0-9a-fA-F]{64}$/.test(configured)) throw new Error('VOTER_KEY_ENCRYPTION_KEY must be a 32-byte hex key.');
-  return Buffer.from(configured, 'hex');
-}
-function encryptPrivateKey(privateKey: Hex) {
-  const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);
-  const ciphertext = Buffer.concat([cipher.update(privateKey, 'utf8'), cipher.final()]);
-  return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), ciphertext.toString('hex')].join(':');
-}
-function decryptPrivateKey(encoded: string): Hex {
-  const [ivHex, tagHex, dataHex] = encoded.split(':');
-  if (!ivHex || !tagHex || !dataHex) throw new Error('Stored voter key is malformed');
-  const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8') as Hex;
-}
-
 @Injectable()
 export class AuthService {
   private readonly loginFailures = new Map<string, { count: number; until: number }>();
-  constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService, @Inject(RelayerService) private readonly relay: RelayerService, @Inject(ElectionsService) private readonly elections: ElectionsService) {}
+  constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   private cookieToken(cookie: string | undefined) {
     const prefix = `${sessionCookie}=`;
@@ -184,86 +156,7 @@ export class AuthService {
   }
   async activity(cookie: string | undefined) {
     await this.admin(cookie);
-    const [accountActions, chainActions] = await Promise.all([
-      this.db.adminActivity.findMany({ take: 100, orderBy: { createdAt: 'desc' }, include: { actor: { select: { username: true, fullName: true } } } }),
-      this.db.blockchainTransaction.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, status: 'success', OR: [{ operation: { contains: 'Election' } }, { operation: { contains: 'VoterAuthorized' } }] }, take: 100, orderBy: { observedAt: 'desc' } }),
-    ]);
-    const chain = chainActions.map(row => ({ id: row.transactionHash, action: row.operation.split(',').find(name => name.startsWith('Election') || name === 'VoterAuthorized') ?? row.operation, targetId: row.electionId, createdAt: row.observedAt, actor: { username: 'Chủ hợp đồng', fullName: 'Chủ hợp đồng' }, source: 'indexed-chain' }));
-    return [...accountActions.map(row => ({ ...row, source: 'admin-audit' })), ...chain].sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 100);
-  }
-
-  async createIdentity(cookie: string | undefined, electionIdInput: string, body: unknown) {
-    await this.admin(cookie);
-    const electionId = z.string().regex(/^[1-9]\d{0,19}$/).parse(electionIdInput);
-    const { username } = z.object({ username: z.string().trim().min(1).max(64) }).strict().parse(body);
-    const usernameKey = username.normalize('NFKC').toLocaleLowerCase('en-US');
-    const user = await this.db.appUser.findUnique({ where: { usernameKey } });
-    if (!user || user.status !== 'ACTIVE') throw new BadRequestException({ code: 'USER_NOT_FOUND', message: 'Không tìm thấy tài khoản đang hoạt động.' });
-    const election = await this.chain.election(BigInt(electionId));
-    if (election.state !== 'Draft') throw new BadRequestException({ code: 'ELECTION_NOT_DRAFT', message: 'Chỉ có thể cấp danh tính trước khi khóa cấu hình cuộc bầu cử.' });
-    const scope = { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, electionId, userId: user.id };
-    const old = await this.db.electionVoterIdentity.findUnique({ where: { chainId_contractAddress_electionId_userId: scope } });
-    if (old) return { username: user.username, voterAddress: old.voterAddress, status: old.status, alreadyAssigned: true };
-    const privateKey = generatePrivateKey();
-    const account = privateKeyToAccount(privateKey);
-    let row: ElectionVoterIdentity;
-    try {
-      row = await this.db.electionVoterIdentity.create({ data: { ...scope, voterAddress: account.address.toLowerCase(), encryptedKey: encryptPrivateKey(privateKey) } });
-    } catch (error) {
-      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002')) throw error;
-      const concurrent = await this.db.electionVoterIdentity.findUnique({ where: { chainId_contractAddress_electionId_userId: scope } });
-      if (!concurrent) throw error;
-      return { username: user.username, voterAddress: concurrent.voterAddress, status: concurrent.status, alreadyAssigned: true };
-    }
-    await this.db.adminActivity.create({ data: { actorId: (await this.admin(cookie)).id, action: 'ELIGIBILITY_IDENTITY_ASSIGNED', targetId: electionId } });
-    return { username: user.username, voterAddress: row.voterAddress, status: row.status, alreadyAssigned: false };
-  }
-  async identities(cookie: string | undefined, electionId: string) {
-    await this.admin(cookie);
-    return this.db.electionVoterIdentity.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, electionId }, include: { user: { select: { username: true, fullName: true } } }, orderBy: { createdAt: 'asc' } }).then(rows => rows.map(({ encryptedKey, ...safe }) => { void encryptedKey; return safe; }));
-  }
-  async electionList(cookie: string | undefined) {
-    const user = await this.authenticate(cookie);
-    const [elections, identities] = await Promise.all([
-      this.elections.list(),
-      this.db.electionVoterIdentity.findMany({ where: { userId: user.id, chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, status: 'ACTIVE' }, select: { electionId: true, voterAddress: true } }),
-    ]);
-    const byElection = new Map(identities.map(identity => [identity.electionId, identity.voterAddress as Address]));
-    return Promise.all(elections.map(async election => {
-      const voter = byElection.get(election.chain.id);
-      const personalized = voter ? await this.elections.get(election.chain.id, voter) : election;
-      return { ...personalized, userEligible: !!voter && !!personalized.chain.eligible, userHasVoted: !!voter && !!personalized.chain.hasVoted };
-    }));
-  }
-  async history(cookie: string | undefined) {
-    const user = await this.authenticate(cookie);
-    const identities = await this.db.electionVoterIdentity.findMany({ where: { userId: user.id, chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address }, select: { electionId: true, voterAddress: true } });
-    const byAddress = new Map(identities.map(identity => [identity.voterAddress.toLowerCase(), identity.electionId]));
-    if (!byAddress.size) return [];
-    const rows = await this.db.gaslessVoteRequest.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, voterAddress: { in: [...byAddress.keys()] } }, include: { transaction: true }, orderBy: { createdAt: 'desc' }, take: 100 });
-    return Promise.all(rows.map(async (row, index) => {
-      const current = index < 10 ? await this.relay.status(row.id).catch(() => null) : null;
-      return { id: row.id, electionId: byAddress.get(row.voterAddress.toLowerCase()), status: index < 10 && !current ? 'UNAVAILABLE' : current?.status ?? row.status, transactionHash: current?.transactionHash ?? row.transaction?.transactionHash ?? null, createdAt: row.createdAt, confirmedAt: current?.confirmedAt ?? row.confirmedAt, errorCode: current?.errorCode ?? row.errorCode };
-    }));
-  }
-  async vote(cookie: string | undefined, electionIdInput: string, body: unknown) {
-    const user = await this.authenticate(cookie);
-    const { candidateId } = z.object({ candidateId: z.number().int().min(0).max(99) }).strict().parse(body);
-    const electionId = z.string().regex(/^[1-9]\d{0,19}$/).parse(electionIdInput);
-    const identity = await this.db.electionVoterIdentity.findUnique({ where: { chainId_contractAddress_electionId_userId: { chainId: String(this.chain.config.CHAIN_ID), contractAddress: this.chain.address, electionId, userId: user.id } } });
-    if (!identity || identity.status !== 'ACTIVE') throw new ForbiddenException({ code: 'VOTING_IDENTITY_NOT_ASSIGNED', message: 'Bạn chưa được cấp quyền tham gia cuộc bầu cử này.' });
-    const election = await this.chain.election(BigInt(electionId), identity.voterAddress as Address);
-    if (!election.eligible) throw new ForbiddenException({ code: 'VOTER_NOT_ELIGIBLE', message: 'Tài khoản này chưa được cấp quyền trên cuộc bầu cử.' });
-    if (election.hasVoted) throw new ConflictException({ code: 'ALREADY_VOTED', message: 'Phiếu của bạn đã được ghi nhận.' });
-    const nonce = await this.chain.client.readContract({ address: this.chain.address, abi: gaslessAbi, functionName: 'nonces', args: [BigInt(electionId), identity.voterAddress as Address] });
-    const block = await this.chain.client.getBlock();
-    const intent = intentSchema.parse({ electionId, manifestHash: election.manifestHash, candidateId: String(candidateId), voter: identity.voterAddress, nonce: nonce.toString(), deadline: (block.timestamp + 120n).toString() });
-    const account = privateKeyToAccount(decryptPrivateKey(identity.encryptedKey));
-    if (account.address.toLowerCase() !== identity.voterAddress.toLowerCase()) throw new Error('Managed voting identity key mismatch');
-    const signature = await account.signTypedData(votingTypedData(intent, this.chain.config.CHAIN_ID, this.chain.address)) as Hex;
-    const intentHash = hashTypedData(votingTypedData(intent, this.chain.config.CHAIN_ID, this.chain.address));
-    const status = await this.relay.submit({ intent, signature }, intentHash);
-    return { ...status, electionId, submittedBy: 'server-managed-election-identity' };
+    return this.db.adminActivity.findMany({ take: 100, orderBy: { createdAt: 'desc' }, include: { actor: { select: { username: true, fullName: true } } } });
   }
 }
 
@@ -286,11 +179,7 @@ export class AuthController {
   @Post('admin/users/:id') updateUser(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.auth.updateUser(cookie, id, body); }
   @Post('admin/users/:id/password') resetUserPassword(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.auth.resetUserPassword(cookie, id, body); }
   @Get('admin/activity') activity(@Headers('cookie') cookie: string | undefined) { return this.auth.activity(cookie); }
-  @Get('elections') async elections(@Headers('cookie') cookie: string | undefined) { return jsonSafe(await this.auth.electionList(cookie)); }
-  @Get('history') history(@Headers('cookie') cookie: string | undefined) { return this.auth.history(cookie); }
-  @Post('admin/elections/:id/identities') assign(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.auth.createIdentity(cookie, id, body); }
-  @Get('admin/elections/:id/identities') identities(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.auth.identities(cookie, id); }
-  @Post('elections/:id/vote') vote(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.auth.vote(cookie, id, body); }
+
 }
-@Module({ imports: [InfrastructureModule, RelayerModule], controllers: [AuthController], providers: [ElectionsService, AuthService] })
+@Module({ imports: [InfrastructureModule], controllers: [AuthController], providers: [AuthService], exports: [AuthService] })
 export class AuthModule {}

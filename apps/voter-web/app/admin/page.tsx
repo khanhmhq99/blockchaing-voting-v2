@@ -1,2 +1,2 @@
-import { AdminPortal } from '../admin-portal';
-export default function AdminPage() { return <AdminPortal view="dashboard" />; }
+import { redirect } from 'next/navigation';
+export default function AdminPage() { redirect('/admin/maci'); }
