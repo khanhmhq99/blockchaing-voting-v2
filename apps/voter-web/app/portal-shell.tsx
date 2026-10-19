@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { api, type AppUser } from './auth-client';
 
 const adminLinks = [
+  ['/admin/monitor', '◉', 'Giám sát bầu cử'],
   ['/admin/maci', '◇', 'Quản lý MACI'],
   ['/admin/users', '♙', 'Người dùng'],
   ['/admin/activity', '▷', 'Nhật ký hoạt động'],

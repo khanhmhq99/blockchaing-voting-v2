@@ -1,0 +1,11 @@
+# MVP 4 decisions
+
+2026-10-17, D1: Keep MACI v3.0.0 and the current four public files. Version an additional election configuration rather than reinterpret the MVP 3 manifest. No protocol or database migration.
+
+2026-10-17, D2: The standalone verifier requires an independent RPC, a separately pinned canonical configuration hash, and a successful pre-election on-chain transaction from an identified publisher to itself whose data is the SHA-256 hash of canonical configuration bytes excluding the `anchor` object. The MACI contracts contain an option count but no candidate ID/order commitment. This additive anchor does not change MACI contracts; publication authority and honest candidate nomination remain explicit trust assumptions. Historical unpinned elections remain `UNSUPPORTED` for the full candidate-mapping claim. A local synthetic pre-election anchor was subsequently sent on 2026-10-18; see `FINAL_REPORT.md`.
+
+2026-10-17, D3: Reuse official pinned MACI contract factories, SDK verification and on-chain verifying keys. Keep the CLI separate from NestJS and Prisma. An app `VERIFIED` status, coordinator `verified` Boolean and stored proof blob never determine the verdict.
+
+2026-10-17, D4: Use existing projection tables for read-only admin telemetry. Counts represent their exact stage; published messages never imply counted voters. No managed database migration or public deployment is authorized.
+
+2026-10-18, D5: The final local application acceptance required distributing the exact anchored candidate configuration alongside the four original files. Add nullable `configurationJson`/`configurationHash` fields to `MaciAuditRecord` with a column-limited runtime UPDATE grant and RLS policy, keeping historic records explicitly `legacy-unbound`. Publication verifies canonical bytes, scope and the pre-election self-transaction; the independent CLI still requires an auditor-held hash and its own RPC. This narrow additive migration supersedes D1's initial no-migration expectation. Apply it only to the isolated local fixture during this acceptance; managed Supabase remains untouched. The API monitor reads real MACI processor/tally counters because optional proof projection rows are not populated by the standalone coordinator.

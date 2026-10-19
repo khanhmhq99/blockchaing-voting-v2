@@ -25,7 +25,10 @@
     "db:check": "tsx scripts/check-database.ts",
     "db:migrate:status": "node scripts/prisma.mjs migrate status",
     "db:migrate:deploy": "node scripts/prisma.mjs migrate deploy",
-    "seed:maci-synthetic-admin": "tsx scripts/seed-maci-synthetic-admin.ts"
+    "seed:maci-synthetic-admin": "tsx scripts/seed-maci-synthetic-admin.ts",
+    "verify:election": "node scripts/verify-election.mjs",
+    "prepare:evidence-config": "node scripts/prepare-evidence-config.mjs",
+    "anchor:mvp4-local": "node scripts/anchor-mvp4-local.mjs"
   },
   "dependencies": {
     "@maci-protocol/contracts": "3.0.0",

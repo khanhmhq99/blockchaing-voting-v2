@@ -184,6 +184,8 @@ model MaciAuditRecord {
   eventsNdjson  String
   proofsJson    String
   tallyJson     String
+  configurationJson String?
+  configurationHash String?
   snapshotBlock BigInt
   snapshotHash  String
   verifiedAt    DateTime @default(now()) @db.Timestamptz(6)

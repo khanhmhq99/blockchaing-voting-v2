@@ -1,6 +1,6 @@
 # MVP 4: Monitoring and public audit
 
-Status: planned; explicit instruction and accepted MVP 3 required. Intended tag: `mvp-4-public-audit`.
+Status: local academic MVP 4 scope completed on 2026-10-18 under the separately approved checkpoint Definition of Done; this broader release roadmap remains partially unimplemented. No tag created. See [local acceptance](../mvp4/FINAL_REPORT.md).
 
 ## Objective and scope
 
@@ -27,7 +27,7 @@ Extract/extend `services/indexer`, create `packages/verifier` and its CLI, add p
 
 ## Acceptance criteria and testing strategy
 
-All statuses: **not run**.
+The table below is the original broader release acceptance matrix. The local academic checkpoint acceptance is recorded separately in [MVP 4 progress](../mvp4/PROGRESS.md); A5 indexer and A6 redundant mirror work were outside that approved local scope and have not been accepted.
 
 | ID | Criterion | Verification |
 | --- | --- | --- |
@@ -53,15 +53,15 @@ Withheld evidence, shared verifier bugs, dishonest RPC sources and telemetry cor
 
 ## Implementation summary
 
-Not started. No indexer service, public archive, standalone verifier release or dashboard exists.
+The local academic prototype now has an admin aggregate dashboard, original-byte public evidence/configuration endpoints, an independently runnable CLI and genuine on-chain proof verification. It has no resilient indexer service, redundant immutable archive/mirror, public deployment or released verifier package. See the scoped [acceptance report](../mvp4/FINAL_REPORT.md).
 
 ## Test evidence
 
-Not run; no independent verification or outage evidence yet.
+Scoped local acceptance ran on Hardhat 31337 with an isolated PostgreSQL fixture; independent proof verification, byte downloads, browser probes and injected chain/RPC faults passed as recorded in the [acceptance report](../mvp4/FINAL_REPORT.md). The full broader A1-A9 release matrix has not been run.
 
 ## Benchmark results
 
-Not measured. No audit/dataset performance claims.
+One former local verifier process was measured at 44,004 ms wall time and 157,913,088 bytes peak sampled RSS; the matched final run measured 14,859 public artifact bytes plus a 1,701-byte configuration. No throughput or broader release benchmark claim is made.
 
 ## Known limitations
 

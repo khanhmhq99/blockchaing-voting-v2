@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { Body, ConflictException, Controller, ForbiddenException, Get, Headers, Inject, Injectable, Module, Param, Post } from '@nestjs/common';
+import { Body, ConflictException, Controller, ForbiddenException, Get, Header, Headers, Inject, Injectable, Module, Param, Post } from '@nestjs/common';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Hex } from 'viem';
 import { z } from 'zod';
@@ -43,6 +43,8 @@ const pollAbi = [
   { type: 'function', name: 'endDate', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'voteOptions', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
 ] as const;
+const messageProcessorCountAbi = [{ type: 'function', name: 'totalBatchesProcessed', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] }] as const;
+const tallyCountAbi = [{ type: 'function', name: 'tallyBatchNum', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] }] as const;
 
 function issuerAccount() {
   const key = process.env.MACI_ISSUER_PRIVATE_KEY;
@@ -121,6 +123,74 @@ export class MaciService {
     return elections.map(election => ({ ...election, eligible: allowed.has(election.id) }));
   }
 
+  async monitor(cookie: string | undefined, electionIdInput: string) {
+    await this.auth.admin(cookie);
+    const electionId = idSchema.parse(electionIdInput);
+    const election = await this.db.maciElection.findUnique({ where: { id: electionId }, select: {
+      id: true, title: true, status: true, chainId: true, maciAddress: true, pollAddress: true, pollId: true,
+      deploymentBlock: true, startTimestamp: true, endTimestamp: true, voteOptions: true,
+    } });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    const [eligible, registered, joins, messages, processing, tally, latestRun, audit] = await Promise.all([
+      this.db.maciEligibility.count({ where: { electionId, status: 'ELIGIBLE' } }),
+      this.db.maciRegistration.count({ where: { electionId, status: 'CONFIRMED' } }),
+      this.db.maciPollJoinSubmission.count({ where: { chainId: election.chainId, pollAddress: election.pollAddress, status: 'JOINED' } }),
+      this.db.maciEncryptedSubmission.groupBy({ by: ['status'], where: { chainId: election.chainId, pollAddress: election.pollAddress }, _count: { _all: true } }),
+      this.db.maciProofSubmission.count({ where: { electionId, kind: 'process', status: 'INCLUDED' } }),
+      this.db.maciProofSubmission.count({ where: { electionId, kind: 'tally', status: 'INCLUDED' } }),
+      this.db.maciCoordinatorRun.findFirst({ where: { electionId }, orderBy: { startedAt: 'desc' }, select: { status: true, processingCount: true, tallyCount: true, errorCode: true, startedAt: true, completedAt: true } }),
+      this.db.maciAuditRecord.findUnique({ where: { electionId }, select: { snapshotBlock: true, snapshotHash: true, verifiedAt: true } }),
+    ]);
+    let chain: { status: 'AVAILABLE' | 'UNAVAILABLE' | 'INVALID' | 'AWAITING_CONFIRMATIONS'; head: string | null; confirmations: string | null; reasonCode: string | null } = { status: 'UNAVAILABLE', head: null, confirmations: null, reasonCode: 'MACI_RPC_UNAVAILABLE' };
+    let onChainProcessing: number | null = null;
+    let onChainTally: number | null = null;
+    try {
+      const chainId = await this.chain.client.getChainId();
+      if (BigInt(chainId) !== BigInt(election.chainId)) chain = { status: 'INVALID', head: null, confirmations: null, reasonCode: 'MACI_CHAIN_MISMATCH' };
+      else {
+        const head = await this.chain.client.getBlockNumber({ cacheTime: 0 });
+        let status: typeof chain.status = 'AVAILABLE';
+        let reasonCode: string | null = null;
+        let confirmations: string | null = null;
+        if (audit) {
+          confirmations = head >= audit.snapshotBlock ? (head - audit.snapshotBlock + 1n).toString() : '0';
+          if (head < audit.snapshotBlock + BigInt(this.chain.config.CHAIN_CONFIRMATIONS - 1)) { status = 'AWAITING_CONFIRMATIONS'; reasonCode = 'MACI_SNAPSHOT_UNCONFIRMED'; }
+          else {
+            const block = await this.chain.client.getBlock({ blockNumber: audit.snapshotBlock });
+            if (block.hash.toLowerCase() !== audit.snapshotHash.toLowerCase()) { status = 'INVALID'; reasonCode = 'MACI_SNAPSHOT_REORG'; }
+          }
+        }
+        chain = { status, head: head.toString(), confirmations, reasonCode };
+        const addresses = await this.chain.client.readContract({ address: getAddress(election.pollAddress), abi: pollAbi, functionName: 'voteOptions' });
+        if (addresses !== BigInt(election.voteOptions)) { chain = { status: 'INVALID', head: head.toString(), confirmations, reasonCode: 'MACI_POLL_MISMATCH' }; }
+        const pollContracts = await this.chain.client.readContract({ address: getAddress(election.maciAddress), abi: maciAbi, functionName: 'getPoll', args: [BigInt(election.pollId)] });
+        if (pollContracts.poll.toLowerCase() !== election.pollAddress.toLowerCase()) chain = { status: 'INVALID', head: head.toString(), confirmations, reasonCode: 'MACI_POLL_MISMATCH' };
+        else {
+          const [processCount, tallyCount] = await Promise.all([
+            this.chain.client.readContract({ address: pollContracts.messageProcessor, abi: messageProcessorCountAbi, functionName: 'totalBatchesProcessed' }),
+            this.chain.client.readContract({ address: pollContracts.tally, abi: tallyCountAbi, functionName: 'tallyBatchNum' }),
+          ]);
+          onChainProcessing = Number(processCount);
+          onChainTally = Number(tallyCount);
+        }
+      }
+    } catch {
+      chain = { status: 'UNAVAILABLE', head: null, confirmations: null, reasonCode: 'MACI_RPC_UNAVAILABLE' };
+      onChainProcessing = null;
+      onChainTally = null;
+    }
+    const submitted = Object.fromEntries(messages.map(row => [row.status, row._count._all]));
+    return {
+      election, observedAt: new Date().toISOString(),
+      counts: { eligible, registered, joined: joins, encryptedCommandsIncluded: submitted.INCLUDED ?? 0,
+        encryptedCommandsPending: (submitted.PENDING ?? 0) + (submitted.PREPARED ?? 0) },
+      processing: { submittedBatches: onChainProcessing, tallyBatches: onChainTally, projectedProcessSubmissions: processing, projectedTallySubmissions: tally, latestRun },
+      chain, historicalAudit: audit ? { snapshotBlock: audit.snapshotBlock.toString(), snapshotHash: audit.snapshotHash, verifiedAt: audit.verifiedAt.toISOString() } : null,
+      currentVerification: !audit ? 'INCOMPLETE' : chain.status === 'AVAILABLE' ? 'APPLICATION_VERIFIED' : chain.status === 'INVALID' ? 'INVALID' : chain.status === 'AWAITING_CONFIRMATIONS' ? 'AWAITING_CONFIRMATIONS' : 'UNAVAILABLE',
+      limitations: ['Included encrypted commands are not counted votes.', 'Application verification is not an independent verifier PASS.'],
+    };
+  }
+
   async assign(cookie: string | undefined, electionIdInput: string, body: unknown) {
     await this.auth.admin(cookie);
     const electionId = idSchema.parse(electionIdInput);
@@ -193,6 +263,7 @@ export class MaciController {
   @Post('admin/elections') configure(@Headers('cookie') cookie: string | undefined, @Body() body: unknown) { return this.maci.configure(cookie, body); }
   @Post('admin/elections/:id/status') setStatus(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.setStatus(cookie, id, body); }
   @Get('elections') list(@Headers('cookie') cookie: string | undefined) { return this.maci.list(cookie); }
+  @Get('admin/elections/:id/monitor') monitor(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.monitor(cookie, id); }
   @Post('admin/elections/:id/eligibility') assign(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.assign(cookie, id, body); }
   @Post('elections/:id/authorization') issue(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.issue(cookie, id, body); }
   @Get('elections/:id/eligibility') eligibility(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.eligibility(cookie, id); }
@@ -201,7 +272,11 @@ export class MaciController {
   @Post('elections/:id/joins') submitJoin(@Headers('cookie') cookie: string | undefined, @Headers('idempotency-key') key: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.join.submit(id, body, key, cookie); }
   @Get('joins/:id') joinStatus(@Param('id') id: string) { return this.join.status(id); }
   @Post('admin/elections/:id/audit') publishAudit(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.audit.publish(cookie, id, body); }
+  @Post('admin/elections/:id/configuration') publishConfiguration(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.audit.publishConfiguration(cookie, id, body); }
   @Get('elections/:id/audit') publicAudit(@Param('id') id: string) { return this.audit.publicEvidence(id); }
+  @Get('elections/:id/configuration') publicConfiguration(@Param('id') id: string) { return this.audit.publicConfiguration(id); }
+  @Get('elections/:id/configuration.json') @Header('Content-Type', 'text/plain; charset=utf-8') publicConfigurationArtifact(@Param('id') id: string) { return this.audit.publicConfigurationArtifact(id); }
+  @Get('elections/:id/evidence/:artifact') @Header('Content-Type', 'text/plain; charset=utf-8') publicArtifact(@Param('id') id: string, @Param('artifact') artifact: string) { return this.audit.publicArtifact(id, artifact); }
   @Post('elections/:id/messages') submitMessage(@Headers('cookie') cookie: string | undefined, @Headers('idempotency-key') key: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.relay.submit(id, body, key, cookie); }
   @Get('messages/:id') messageStatus(@Param('id') id: string) { return this.relay.status(id); }
 }

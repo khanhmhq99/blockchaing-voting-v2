@@ -1,0 +1,7 @@
+# MVP 5 handoff from MVP 4
+
+Status 2026-10-18: **READY FOR SEPARATELY AUTHORIZED MVP 5 PLANNING**. The explicitly authorized local academic MVP 4 Definition of Done passed on the matched `mvp4_1792310083` Hardhat/PostgreSQL run. Genuine MACI proofs, independent standalone `PASS`/exit 0, negative checks, authenticated monitor, original public artifact/configuration downloads and browser acceptance are recorded in [the report](../mvp4/FINAL_REPORT.md). This handoff does not itself authorize MVP 5 implementation.
+
+The MVP 4 admin monitor exposes aggregate stage counts and chain/audit health, with no individual choices or identity-to-command joins. These can inform a future advisory operational anomaly detector only after privacy review, authorized synthetic evaluation data and an independently verified MVP 4 chain/proof run. AI must not reject votes, alter a tally, infer individual choices, or use individual vote choices as features.
+
+MVP 5 planning may use aggregate stage counts and chain health, subject to privacy review. Preserve status semantics: registered, joined, included command, counted vote and verified aggregate are different quantities. The accepted snapshot and local database are synthetic and ephemeral. The snapshot mismatch test was injected through an RPC proxy; it is not a real reorg observation. Artifact ceremony provenance, independently retained candidate publisher policy and public deployment gates remain future research work. See [MVP 4 acceptance report](../mvp4/FINAL_REPORT.md) and [MVP 5 roadmap](../mvps/mvp-5-ai-fraud.md).

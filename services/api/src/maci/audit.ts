@@ -51,7 +51,24 @@ const uploadSchema = z.object({
   manifestJson: z.string().min(1).max(20_000), eventsNdjson: z.string().min(1).max(70_000),
   proofsJson: z.string().min(1).max(70_000), tallyJson: z.string().min(1).max(20_000),
 }).strict();
+const configurationSchema = z.object({
+  format: z.literal('maci-election-config-v1'), candidateBinding: z.literal('onchain-pre-election-hash-v1'),
+  electionId: z.uuid(), protocol: z.literal('maci-v3.0.0-full-v1'), chainId: decimal,
+  maciAddress: address, pollAddress: address, pollId: decimal, deploymentBlock: decimal,
+  coordinatorKeyX: decimal, coordinatorKeyY: decimal, startTimestamp: decimal, endTimestamp: decimal,
+  voteOptions: z.number().int().min(2).max(125),
+  candidates: z.array(z.object({ id: z.string().min(1).max(120), name: z.string().min(1).max(120), optionIndex: z.number().int().nonnegative() }).strict()).min(2).max(125),
+  artifactHashes: z.record(z.string(), sha), codeHashes: z.record(z.string(), hex32),
+  anchor: z.object({ sender: address, transactionHash: hex32 }).strict(),
+}).strict();
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  if (typeof value === 'string' || typeof value === 'boolean' || value === null) return JSON.stringify(value);
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  fail('MACI_CONFIG_NONCANONICAL');
+}
 function fail(code: string): never { throw new ConflictException({ code, message: 'MACI audit evidence does not match the canonical chain state.' }); }
 function parseJson(value: string): unknown {
   try { return JSON.parse(value) as unknown; }
@@ -167,5 +184,72 @@ export class MaciAuditService {
     const block = await this.chain.client.getBlock({ blockNumber: record.snapshotBlock });
     if (block.hash.toLowerCase() !== record.snapshotHash.toLowerCase()) fail('MACI_SNAPSHOT_REORG');
     return { protocol: 'maci-v3.0.0-full-v1', manifest: JSON.parse(record.manifestJson), events: record.eventsNdjson.trimEnd().split('\n').map(line => JSON.parse(line)), proofs: JSON.parse(record.proofsJson), tally: JSON.parse(record.tallyJson) };
+  }
+
+  async publishConfiguration(cookie: string | undefined, electionIdInput: string, body: unknown) {
+    await this.auth.admin(cookie);
+    const electionId = z.uuid().parse(electionIdInput);
+    const input = z.object({ configurationJson: z.string().min(1).max(20_000), configurationSha256: sha }).strict().parse(body);
+    const config = parseEvidence(configurationSchema, parseJson(input.configurationJson), 'MACI_CONFIG_INVALID');
+    if (input.configurationJson !== `${canonical(config)}\n` || digest(input.configurationJson) !== input.configurationSha256) fail('MACI_CONFIG_HASH_MISMATCH');
+    const [election, record] = await Promise.all([
+      this.db.maciElection.findUnique({ where: { id: electionId } }),
+      this.db.maciAuditRecord.findUnique({ where: { electionId } }),
+    ]);
+    if (!election || !record || election.status !== 'VERIFIED') fail('MACI_CONFIG_AUDIT_UNAVAILABLE');
+    if (record.configurationHash && record.configurationHash !== input.configurationSha256) fail('MACI_CONFIG_ALREADY_PUBLISHED');
+    const manifest = parseEvidence(manifestSchema, parseJson(record.manifestJson), 'MACI_AUDIT_MANIFEST_INVALID');
+    const names = z.array(z.string()).parse(election.candidates);
+    if (config.electionId !== electionId || config.chainId !== election.chainId || config.maciAddress.toLowerCase() !== election.maciAddress || config.pollAddress.toLowerCase() !== election.pollAddress || config.pollId !== election.pollId || config.deploymentBlock !== election.deploymentBlock || config.coordinatorKeyX !== election.coordinatorKeyX || config.coordinatorKeyY !== election.coordinatorKeyY || config.startTimestamp !== election.startTimestamp || config.endTimestamp !== election.endTimestamp || config.voteOptions !== election.voteOptions || config.candidates.length !== names.length || config.candidates.some((candidate, index) => candidate.optionIndex !== index || candidate.name !== names[index]) || new Set(config.candidates.map(candidate => candidate.id)).size !== config.candidates.length || canonical(config.artifactHashes) !== canonical(manifest.artifactHashes)) fail('MACI_CONFIG_SCOPE_MISMATCH');
+    const base: Record<string, unknown> = { ...config };
+    delete base.anchor;
+    const anchorHash = `0x${digest(`${canonical(base)}\n`)}`;
+    try {
+      const tx = await this.chain.client.getTransaction({ hash: config.anchor.transactionHash as `0x${string}` });
+      const receipt = await this.chain.client.getTransactionReceipt({ hash: config.anchor.transactionHash as `0x${string}` });
+      const block = await this.chain.client.getBlock({ blockNumber: receipt.blockNumber });
+      if (tx.from.toLowerCase() !== config.anchor.sender.toLowerCase() || tx.to?.toLowerCase() !== config.anchor.sender.toLowerCase() || tx.value !== 0n || tx.input.toLowerCase() !== anchorHash || receipt.status !== 'success' || receipt.blockHash !== block.hash || block.timestamp >= BigInt(config.startTimestamp) || receipt.blockNumber > record.snapshotBlock) fail('MACI_CONFIG_ANCHOR_INVALID');
+    } catch { fail('MACI_CONFIG_ANCHOR_INVALID'); }
+    await this.db.maciAuditRecord.update({ where: { electionId }, data: { configurationJson: input.configurationJson, configurationHash: input.configurationSha256 } });
+    return { electionId, candidateBinding: config.candidateBinding, canonicalSha256: input.configurationSha256 };
+  }
+
+  async publicConfiguration(electionIdInput: string) {
+    const electionId = z.uuid().parse(electionIdInput);
+    const [election, record] = await Promise.all([
+      this.db.maciElection.findUnique({ where: { id: electionId }, select: {
+        id: true, chainId: true, maciAddress: true, pollAddress: true, pollId: true, deploymentBlock: true,
+        coordinatorKeyX: true, coordinatorKeyY: true, startTimestamp: true, endTimestamp: true,
+        voteOptions: true, protocolVersion: true, candidates: true,
+      } }),
+      this.db.maciAuditRecord.findUnique({ where: { electionId }, select: { id: true, configurationJson: true, configurationHash: true } }),
+    ]);
+    if (!election || !record) throw new ConflictException({ code: 'MACI_CONFIG_UNAVAILABLE', message: 'Public election configuration is unavailable.' });
+    if (record.configurationJson && record.configurationHash) return { configuration: JSON.parse(record.configurationJson), canonicalSha256: record.configurationHash, warning: 'Verify this candidate binding independently using the CLI, a prior pinned hash, and your own chain RPC.' };
+    const candidates = z.array(z.string()).parse(election.candidates);
+    const config = {
+      format: 'maci-election-config-v1', candidateBinding: 'legacy-unbound', electionId: election.id,
+      protocol: election.protocolVersion, chainId: election.chainId, maciAddress: election.maciAddress,
+      pollAddress: election.pollAddress, pollId: election.pollId, deploymentBlock: election.deploymentBlock,
+      coordinatorKeyX: election.coordinatorKeyX, coordinatorKeyY: election.coordinatorKeyY,
+      startTimestamp: election.startTimestamp, endTimestamp: election.endTimestamp, voteOptions: election.voteOptions,
+      candidates: candidates.map((name, optionIndex) => ({ id: `legacy-option-${optionIndex}`, optionIndex, name })),
+    };
+    return { configuration: config, canonicalSha256: digest(`${canonical(config)}\n`), warning: 'Historical candidate order was not committed on-chain or pinned before election start. The independent verifier must classify full candidate mapping as UNSUPPORTED.' };
+  }
+
+  async publicConfigurationArtifact(electionIdInput: string) {
+    await this.publicEvidence(electionIdInput);
+    const record = await this.db.maciAuditRecord.findUnique({ where: { electionId: z.uuid().parse(electionIdInput) }, select: { configurationJson: true } });
+    if (!record?.configurationJson) throw new ConflictException({ code: 'MACI_CONFIG_UNAVAILABLE', message: 'Canonical candidate configuration is unavailable.' });
+    return record.configurationJson;
+  }
+
+  async publicArtifact(electionIdInput: string, artifact: string) {
+    const allowed = { 'manifest.json': 'manifestJson', 'events.ndjson': 'eventsNdjson', 'proofs.json': 'proofsJson', 'tally.json': 'tallyJson' } as const;
+    if (!(artifact in allowed)) throw new BadRequestException({ code: 'MACI_ARTIFACT_UNKNOWN', message: 'Unknown public artifact.' });
+    await this.publicEvidence(electionIdInput);
+    const record = await this.db.maciAuditRecord.findUniqueOrThrow({ where: { electionId: z.uuid().parse(electionIdInput) } });
+    return record[allowed[artifact as keyof typeof allowed]];
   }
 }
