@@ -4,6 +4,9 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule, SafeExceptionFilter } from './app.js';
 
 async function main() {
+  // Coordinator and prover secrets belong only to the separate proof worker.
+  delete process.env.MACI_COORDINATOR_PRIVATE_KEY;
+  delete process.env.MACI_PROVER_PRIVATE_KEY;
   const app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
   const configuredOrigin = new URL(process.env.APP_ORIGIN ?? 'http://localhost:3000');
   const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);

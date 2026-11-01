@@ -14,6 +14,12 @@ Communicate with the owner in Vietnamese. Use English for code, comments, identi
 
 ## Navigation
 
+- `.agents/skills/frontend-engineer/SKILL.md`: use for React, Next.js, and TypeScript frontend implementation, refactoring, or code review.
+- `.agents/skills/ui-ux-designer/SKILL.md`: use for interface design, visual or interaction changes, responsive behavior, or UX review.
+- Apply both skills when a task combines frontend implementation with UI/UX design. Follow `apps/voter-web/AGENTS.md` for application-specific Next.js rules.
+- `.agents/skills/frontend-engineer/SKILL.md`: use for React, Next.js, and TypeScript frontend implementation, refactoring, or code review.
+- `.agents/skills/ui-ux-designer/SKILL.md`: use for interface design, visual or interaction changes, responsive behavior, or UX review.
+- Apply both skills when a task combines frontend implementation with UI/UX design. Follow `apps/voter-web/AGENTS.md` for application-specific Next.js rules.
 - `README.md`: project status and document index.
 - `docs/architecture/`: inspection, component boundaries, technology evaluation, engineering standards, and ADRs.
 - `docs/protocols/voting-protocol.md`: baseline versus proposed anonymous protocol.

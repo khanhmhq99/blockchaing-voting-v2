@@ -1,3 +1,2 @@
-import { MaciPanel } from '../maci-panel';
-
-export default function MaciPage() { return <MaciPanel />; }
+import { redirect } from 'next/navigation';
+export default function MaciPage() { redirect('/user'); }

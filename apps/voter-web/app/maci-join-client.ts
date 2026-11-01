@@ -15,13 +15,26 @@ const joinAbi = [{ type: 'function', name: 'joinPoll', stateMutability: 'nonpaya
   { name: '_initialVoiceCreditProxyData', type: 'bytes' },
 ], outputs: [] }] as const;
 
+async function assertRpcChain(provider: JsonRpcProvider, chainId: string) {
+  if (chainId !== '31337') throw new Error('MACI_RPC_CHAIN_MISMATCH');
+  let actual: bigint;
+  try { actual = BigInt(await provider.send('eth_chainId', [])); }
+  catch { throw new Error('MACI_RPC_UNAVAILABLE'); }
+  if (actual !== BigInt(chainId)) throw new Error('MACI_RPC_CHAIN_MISMATCH');
+}
+
+async function assertContract(provider: JsonRpcProvider, address: Address) {
+  if (await provider.getCode(address) === '0x') throw new Error('MACI_CONTRACT_MISSING');
+}
+
 export async function generateMaciJoin(args: {
   secret: string; rpcUrl: string; chainId: string; maciAddress: Address;
   pollAddress: Address; pollId: string; deploymentBlock: string;
 }) {
   if (!/^macisk\.[0-9a-f]{64}$/.test(args.secret)) throw new Error('Invalid MACI credential.');
   const provider = new JsonRpcProvider(args.rpcUrl, Number(args.chainId));
-  if (BigInt((await provider.getNetwork()).chainId) !== BigInt(args.chainId)) throw new Error('MACI RPC chain mismatch.');
+  await assertRpcChain(provider, args.chainId);
+  await Promise.all([assertContract(provider, args.maciAddress), assertContract(provider, args.pollAddress)]);
   const reader = new VoidSigner('0x0000000000000000000000000000000000000001', provider);
   const pair = new Keypair(PrivateKey.deserialize(args.secret));
   const maci = MACI__factory.connect(args.maciAddress, reader);
@@ -52,6 +65,8 @@ export async function findMaciJoin(args: {
   secret: string; rpcUrl: string; chainId: string; maciAddress: Address; pollId: string; deploymentBlock: string;
 }) {
   const provider = new JsonRpcProvider(args.rpcUrl, Number(args.chainId));
+  await assertRpcChain(provider, args.chainId);
+  await assertContract(provider, args.maciAddress);
   const reader = new VoidSigner('0x0000000000000000000000000000000000000001', provider);
   const pair = new Keypair(PrivateKey.deserialize(args.secret));
   const joined = await getJoinedUserData({

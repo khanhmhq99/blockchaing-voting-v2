@@ -148,6 +148,7 @@ async function verify(args, checks, report) {
   const dir = path.resolve(args.evidence);
   const raw = Object.fromEntries(['manifest.json', 'events.ndjson', 'proofs.json', 'tally.json'].map(name => [name, readFile(dir, name)]));
   const manifest = parse(raw['manifest.json'], 'MANIFEST_JSON_INVALID');
+  requireThat(manifest.chainId === 31337, 'CHAIN_ID_MISMATCH');
   report.electionId = null;
   report.pollId = manifest.pollId ?? null; report.chainId = manifest.chainId ?? null;
   report.snapshot = { number: manifest.snapshotBlock ?? null, hash: manifest.snapshotBlockHash ?? null };
@@ -167,6 +168,8 @@ async function verify(args, checks, report) {
   report.electionId = config.electionId ?? null;
   report.configurationHash = checkConfiguration(config, manifest, args['config-sha256']);
   checks.push({ code: 'CANDIDATE_CONFIGURATION', status: 'PASS', trust: 'caller supplied hash; on-chain pre-election anchor still required' });
+  const rpc = new URL(args.rpc);
+  requireThat(rpc.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(rpc.hostname) && !rpc.username && !rpc.password && rpc.pathname === '/' && !rpc.search && !rpc.hash, 'LOCAL_RPC_REQUIRED');
   const provider = new JsonRpcProvider(args.rpc);
   requireThat(Number((await provider.getNetwork()).chainId) === manifest.chainId, 'CHAIN_ID_MISMATCH');
   const head = await provider.getBlockNumber();

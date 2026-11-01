@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "dev:api": "tsx watch services/api/src/main.ts",
+    "proof:worker": "tsx services/api/src/maci/proof-worker-main.ts",
     "dev:web": "node scripts/web.mjs dev",
     "chain": "hardhat node --hostname 127.0.0.1",
     "build:contracts": "node scripts/compile-contracts.mjs",

@@ -4,6 +4,8 @@ This repository's active application is a synthetic, walletless MACI v3 voting p
 
 The current local application integration completed with two synthetic voters and a verified `[1,1,0]` tally. See [MACI progress and recovery](docs/mvp3/maci/PROGRESS.md), [implementation plan](docs/mvp3/maci/IMPLEMENTATION_PLAN.md), [benchmarks](docs/mvp3/maci/BENCHMARKS.md) and [architecture decision](docs/architecture/adr/0010-maci-mvp3-protocol-migration.md). BSC Testnet deployment has **not** occurred. M0 provenance and security review remain deferred and unapproved.
 
+The current [dashboard and browser workflow continuation](docs/enhancements/maci-dashboard-automation/IMPLEMENTATION.md) documents the Admin/Voter routes and automatic registration/join prerequisites. [Local MACI credentials](docs/mvp3/maci/LOCAL_CREDENTIALS.md) documents browser persistence and recovery limits.
+
 The revised academic MVP 3 scope is tracked in [progress](docs/mvp3/PROGRESS.md), [ADR 0011](docs/architecture/adr/0011-mvp3-academic-scope-and-research-isolation.md), [final report](docs/mvp3/FINAL_REPORT.md) and [MVP 4 handoff](docs/mvp4/HANDOFF_FROM_MVP3.md). An isolated [Semaphore + MACI local research PoC](research/mvp3/semaphore-maci/README.md) verified a synthetic tally without changing the main voting protocol. Operator linkability and coordinator visibility are disclosed research limitations. Current local synthetic functional and finality/failure acceptance passed with documented limits. MVP 3 is complete for the academic research scope and MVP 4 is ready to start; neither status approves public deployment or real-electorate use.
 
 The explicitly authorized local academic [MVP 4 acceptance](docs/mvp4/PROGRESS.md) is complete. A matched synthetic Hardhat/PostgreSQL election produced genuine MACI processing/tally proofs, a pre-election candidate anchor and an independent [standalone verifier](docs/mvp4/PUBLIC_VERIFICATION.md) `PASS` with exit 0 using publicly downloaded original evidence and configuration. Negative checks, authenticated monitoring and browser acceptance passed. The broader public deployment/indexer/mirror roadmap remains future work. The historic MVP 3 candidate order has no pre-election commitment and remains `UNSUPPORTED` for full candidate-mapped verification. See the [acceptance report](docs/mvp4/FINAL_REPORT.md) for exact evidence and limits. MVP 5 implementation has not started.
@@ -12,9 +14,9 @@ MVP 1/2/2.5 results remain in `docs/mvps/`, `docs/benchmarks/`, prior deployment
 
 ## Active source
 
-- `apps/voter-web/`: browser credential backup/recovery, joining proof, encrypted command and final results; no voter wallet is required.
+- `apps/voter-web/`: browser-local MACI credential, joining proof, encrypted command and final results; no voter wallet is required.
 - `services/api/`: account sessions, eligibility, MACI registration and anonymous join/message relays, audit verification/publication.
-- `services/api/prisma/`: clean MACI-first schema, two existing MACI migrations and an additive public-configuration migration applied only to the isolated MVP 4 local fixture.
+- `services/api/prisma/`: MACI-first schema and six versioned migrations, up to date on the configured Supabase development schema as of 2026-10-25.
 - `packages/contracts/contracts/`: sponsored MACI registration and open poll-join policy.
 - `scripts/deploy-maci-local.mjs`: explicit synthetic deployment to a persistent Hardhat chain 31337 only.
 - `scripts/maci-coordinator.mjs`: explicit proof generation, on-chain submission and public evidence export.

@@ -37,6 +37,9 @@ export class MaciRegistrationRelay {
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
     if (!election || election.status !== 'REGISTRATION') throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration is not open.' });
     if (await this.chain.client.getChainId() !== Number(election.chainId)) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'MACI RPC chain changed.' });
+    const chainNowAtSubmission = (await this.chain.client.getBlock()).timestamp;
+    const wallNowAtSubmission = BigInt(Math.floor(Date.now() / 1000));
+    if ((chainNowAtSubmission > wallNowAtSubmission ? chainNowAtSubmission : wallNowAtSubmission) >= BigInt(election.startTimestamp)) throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration closed at poll start.' });
     const row = await this.db.maciRegistration.findUnique({ where: { electionId_userId: { electionId, userId: user.id } } });
     if (!row) throw new ForbiddenException({ code: 'MACI_AUTHORIZATION_REQUIRED', message: 'A registration authorization is required.' });
     if (row.status === 'CONFIRMED' && row.rawTransaction) return this.view(await this.reconcile(row.id));
@@ -53,7 +56,7 @@ export class MaciRegistrationRelay {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lane})::bigint)`;
       const latest = await tx.maciRegistration.findUniqueOrThrow({ where: { id: row.id } });
       if (latest.rawTransaction || latest.status === 'CONFIRMED') return latest;
-      const active = await tx.maciRegistration.findFirst({ where: { status: { in: ['PREPARED', 'PENDING'] }, election: { chainId: election.chainId } } });
+      const active = await tx.maciRegistration.findFirst({ where: { status: { in: ['PREPARED', 'PENDING'] }, election: { chainId: election.chainId, deploymentInstanceId: election.deploymentInstanceId } } });
       if (active) throw new HttpException({ code: 'MACI_REGISTRATION_RELAY_BUSY', message: 'Another registration is pending.' }, 429);
       const nonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'pending' });
       if (nonce !== await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' })) throw new ServiceUnavailableException({ code: 'MACI_EXTERNAL_PENDING', message: 'Registration sponsor has a pending transaction.' });
@@ -111,6 +114,7 @@ export class MaciRegistrationRelay {
     }
     const latestNonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' });
     if (latestNonce > row.nonce) return this.db.maciRegistration.update({ where: { id }, data: { status: 'PENDING' } });
+    await this.chain.requireLocalContract(row.election.registrationAddress as Address);
     try {
       await createWalletClient({ transport: http(this.chain.config.RPC_URL, { timeout: 10_000, retryCount: 0 }) }).sendRawTransaction({ serializedTransaction: raw });
     } catch { /* Preserve signed bytes for retry and manual reconciliation. */ }

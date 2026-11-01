@@ -12,6 +12,9 @@ import { MaciRelayService } from './relay.js';
 import { MaciRegistrationRelay } from './registration-relay.js';
 import { MaciJoinRelay } from './join-relay.js';
 import { MaciAuditService } from './audit.js';
+import { MaciProofJobs } from './proof-jobs.js';
+import { MaciDeploymentService } from './deployment.js';
+import { effectiveLocalElectionTime, timedElectionStatus } from './election-clock.js';
 import { MACI_SNARK_FIELD } from '../../../../packages/shared-types/src/maci.js';
 
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform(value => getAddress(value));
@@ -61,8 +64,8 @@ export class MaciService {
     @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
-  private async verifyDeployment(input: z.infer<typeof deploymentSchema>) {
-    if (BigInt(input.chainId) !== BigInt(await this.chain.client.getChainId())) throw new ConflictException({ code: 'MACI_CHAIN_MISMATCH', message: 'MACI chain does not match the configured RPC.' });
+  async verifyDeployment(input: z.infer<typeof deploymentSchema>) {
+    if (input.chainId !== '31337' || this.chain.config.CHAIN_ID !== 31337 || await this.chain.client.getChainId() !== 31337) throw new ConflictException({ code: 'MACI_CHAIN_MISMATCH', message: 'This MACI election requires Hardhat Local chain 31337.' });
     if (BigInt(input.deploymentBlock) > await this.chain.client.getBlockNumber()) throw new ConflictException({ code: 'MACI_DEPLOYMENT_BLOCK_INVALID', message: 'MACI deployment block is in the future.' });
     for (const address of [input.maciAddress, input.registrationAddress, input.pollAddress]) {
       if (!await this.chain.client.getCode({ address })) throw new ConflictException({ code: 'MACI_CONTRACT_MISSING', message: 'A configured MACI contract is missing.' });
@@ -83,6 +86,16 @@ export class MaciService {
       this.chain.client.readContract({ address: input.pollAddress, abi: pollAbi, functionName: 'voteOptions' }),
     ]);
     return { coordinatorKeyX: coordinatorKey[0].toString(), coordinatorKeyY: coordinatorKey[1].toString(), startTimestamp: startDate.toString(), endTimestamp: endDate.toString(), voteOptions: Number(voteOptions) };
+  }
+
+  private async requireRegistrationWindow(election: { status: string; startTimestamp: string; endTimestamp: string; voteOptions: number; chainId: string; maciAddress: string; registrationAddress: string; pollAddress: string; pollId: string; deploymentBlock: string }) {
+    if (election.status !== 'REGISTRATION') throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration is closed.' });
+    const deployment = { chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock };
+    const onChain = await this.verifyDeployment(deployment);
+    if (onChain.startTimestamp !== election.startTimestamp || onChain.endTimestamp !== election.endTimestamp || onChain.voteOptions !== election.voteOptions) throw new ConflictException({ code: 'MACI_POLL_MISMATCH', message: 'Poll configuration changed on chain.' });
+    const chainNow = (await this.chain.client.getBlock()).timestamp;
+    const wallNow = BigInt(Math.floor(Date.now() / 1000));
+    if ((chainNow > wallNow ? chainNow : wallNow) >= BigInt(election.startTimestamp)) throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration closed at poll start.' });
   }
 
   async configure(cookie: string | undefined, body: unknown) {
@@ -109,7 +122,8 @@ export class MaciService {
     const { status } = z.object({ status: z.enum(['OPEN', 'CLOSED']) }).strict().parse(body);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
     if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
-    const now = (await this.chain.client.getBlock()).timestamp;
+    const blockNow = (await this.chain.client.getBlock()).timestamp;
+    const now = election.chainId === '31337' ? effectiveLocalElectionTime(blockNow, BigInt(Math.floor(Date.now() / 1000))) : blockNow;
     if (status === 'OPEN' && (election.status !== 'REGISTRATION' || now < BigInt(election.startTimestamp) || now > BigInt(election.endTimestamp))) throw new ConflictException({ code: 'MACI_POLL_NOT_OPEN', message: 'On-chain voting window is not open.' });
     if (status === 'CLOSED' && (election.status !== 'OPEN' || now <= BigInt(election.endTimestamp))) throw new ConflictException({ code: 'MACI_POLL_NOT_CLOSED', message: 'On-chain voting window has not closed.' });
     return this.db.maciElection.update({ where: { id: electionId }, data: { status }, select: { id: true, status: true } });
@@ -117,29 +131,47 @@ export class MaciService {
 
   async list(cookie: string | undefined) {
     const user = await this.auth.authenticate(cookie);
-    const elections = await this.db.maciElection.findMany({ orderBy: { createdAt: 'desc' }, select: { id: true, title: true, candidates: true, chainId: true, maciAddress: true, pollAddress: true, pollId: true, deploymentBlock: true, protocolVersion: true, status: true, coordinatorKeyX: true, coordinatorKeyY: true, startTimestamp: true, endTimestamp: true, voteOptions: true } });
+    const elections = await this.db.maciElection.findMany({ orderBy: { createdAt: 'desc' }, select: { id: true, title: true, candidates: true, chainId: true, maciAddress: true, registrationAddress: true, pollAddress: true, pollId: true, deploymentBlock: true, protocolVersion: true, status: true, coordinatorKeyX: true, coordinatorKeyY: true, startTimestamp: true, endTimestamp: true, voteOptions: true } });
     const eligibility = await this.db.maciEligibility.findMany({ where: { userId: user.id }, select: { electionId: true, status: true } });
     const allowed = new Set(eligibility.filter(row => row.status === 'ELIGIBLE').map(row => row.electionId));
-    return elections.map(election => ({ ...election, eligible: allowed.has(election.id) }));
+    return Promise.all(elections.map(async election => {
+      let chainHealth = 'AVAILABLE';
+      let status = election.status;
+      try {
+        const actual = await this.verifyDeployment({ chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock });
+        if (actual.startTimestamp !== election.startTimestamp || actual.endTimestamp !== election.endTimestamp || actual.voteOptions !== election.voteOptions) throw new Error('poll mismatch');
+        if (status !== 'VERIFIED') {
+          const now = effectiveLocalElectionTime((await this.chain.client.getBlock()).timestamp, BigInt(Math.floor(Date.now() / 1000)));
+          const next = timedElectionStatus(now, election.startTimestamp, election.endTimestamp);
+          if (next !== status && (status === 'REGISTRATION' || status === 'OPEN')) {
+            const updated = await this.db.maciElection.updateMany({ where: { id: election.id, status }, data: { status: next } });
+            if (updated.count === 1) status = next;
+          }
+        }
+      } catch { chainHealth = 'INVALID_OR_UNAVAILABLE'; }
+      return { ...election, status, chainHealth, eligible: chainHealth === 'AVAILABLE' && allowed.has(election.id) };
+    }));
   }
 
   async monitor(cookie: string | undefined, electionIdInput: string) {
     await this.auth.admin(cookie);
     const electionId = idSchema.parse(electionIdInput);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId }, select: {
-      id: true, title: true, status: true, chainId: true, maciAddress: true, pollAddress: true, pollId: true,
+      id: true, title: true, status: true, chainId: true, deploymentInstanceId: true, maciAddress: true, registrationAddress: true, pollAddress: true, pollId: true,
       deploymentBlock: true, startTimestamp: true, endTimestamp: true, voteOptions: true,
     } });
     if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
-    const [eligible, registered, joins, messages, processing, tally, latestRun, audit] = await Promise.all([
+    const [eligible, registered, joins, messages, processing, tally, latestRun, audit, requestGroups, deploymentJob] = await Promise.all([
       this.db.maciEligibility.count({ where: { electionId, status: 'ELIGIBLE' } }),
       this.db.maciRegistration.count({ where: { electionId, status: 'CONFIRMED' } }),
-      this.db.maciPollJoinSubmission.count({ where: { chainId: election.chainId, pollAddress: election.pollAddress, status: 'JOINED' } }),
-      this.db.maciEncryptedSubmission.groupBy({ by: ['status'], where: { chainId: election.chainId, pollAddress: election.pollAddress }, _count: { _all: true } }),
+      this.db.maciPollJoinSubmission.count({ where: { chainId: election.chainId, pollAddress: election.pollAddress, deploymentInstanceId: election.deploymentInstanceId, status: 'JOINED' } }),
+      this.db.maciEncryptedSubmission.groupBy({ by: ['status'], where: { chainId: election.chainId, pollAddress: election.pollAddress, deploymentInstanceId: election.deploymentInstanceId }, _count: { _all: true } }),
       this.db.maciProofSubmission.count({ where: { electionId, kind: 'process', status: 'INCLUDED' } }),
       this.db.maciProofSubmission.count({ where: { electionId, kind: 'tally', status: 'INCLUDED' } }),
       this.db.maciCoordinatorRun.findFirst({ where: { electionId }, orderBy: { startedAt: 'desc' }, select: { status: true, processingCount: true, tallyCount: true, errorCode: true, startedAt: true, completedAt: true } }),
       this.db.maciAuditRecord.findUnique({ where: { electionId }, select: { snapshotBlock: true, snapshotHash: true, verifiedAt: true } }),
+      this.db.maciParticipationRequest.groupBy({ by: ['status'], where: { electionId }, _count: { _all: true } }),
+      this.db.maciDeploymentJob.findUnique({ where: { electionId }, select: { status: true, stage: true, diagnosticCode: true } }),
     ]);
     let chain: { status: 'AVAILABLE' | 'UNAVAILABLE' | 'INVALID' | 'AWAITING_CONFIRMATIONS'; head: string | null; confirmations: string | null; reasonCode: string | null } = { status: 'UNAVAILABLE', head: null, confirmations: null, reasonCode: 'MACI_RPC_UNAVAILABLE' };
     let onChainProcessing: number | null = null;
@@ -179,15 +211,29 @@ export class MaciService {
       onChainProcessing = null;
       onChainTally = null;
     }
+    if (chain.status === 'AVAILABLE') {
+      try {
+        const current = await this.verifyDeployment({ chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock });
+        if (current.startTimestamp !== election.startTimestamp || current.endTimestamp !== election.endTimestamp || current.voteOptions !== election.voteOptions) throw new Error('Poll timing mismatch');
+      } catch {
+        chain = { ...chain, status: 'INVALID', reasonCode: 'MACI_DEPLOYMENT_MISMATCH' };
+        onChainProcessing = null; onChainTally = null;
+      }
+    }
     const submitted = Object.fromEntries(messages.map(row => [row.status, row._count._all]));
+    const requestCounts = Object.fromEntries(requestGroups.map(row => [row.status, row._count._all]));
     return {
       election, observedAt: new Date().toISOString(),
-      counts: { eligible, registered, joined: joins, encryptedCommandsIncluded: submitted.INCLUDED ?? 0,
-        encryptedCommandsPending: (submitted.PENDING ?? 0) + (submitted.PREPARED ?? 0) },
+      counts: { eligible, registered, joined: chain.status === 'AVAILABLE' ? joins : null,
+        encryptedCommandsIncluded: chain.status === 'AVAILABLE' ? (submitted.INCLUDED ?? 0) : null,
+        encryptedCommandsPending: chain.status === 'AVAILABLE' ? (submitted.PENDING ?? 0) + (submitted.PREPARED ?? 0) : null,
+        participationTotal: requestGroups.reduce((sum, row) => sum + row._count._all, 0), participationPending: requestCounts.PENDING ?? 0,
+        participationApproved: requestCounts.APPROVED ?? 0, participationRejected: requestCounts.REJECTED ?? 0 },
+      deployment: deploymentJob ?? { status: 'LEGACY_IMPORT', stage: 'UNKNOWN', diagnosticCode: null },
       processing: { submittedBatches: onChainProcessing, tallyBatches: onChainTally, projectedProcessSubmissions: processing, projectedTallySubmissions: tally, latestRun },
       chain, historicalAudit: audit ? { snapshotBlock: audit.snapshotBlock.toString(), snapshotHash: audit.snapshotHash, verifiedAt: audit.verifiedAt.toISOString() } : null,
       currentVerification: !audit ? 'INCOMPLETE' : chain.status === 'AVAILABLE' ? 'APPLICATION_VERIFIED' : chain.status === 'INVALID' ? 'INVALID' : chain.status === 'AWAITING_CONFIRMATIONS' ? 'AWAITING_CONFIRMATIONS' : 'UNAVAILABLE',
-      limitations: ['Included encrypted commands are not counted votes.', 'Application verification is not an independent verifier PASS.'],
+      limitations: ['Poll PublishMessage events can include protocol initialization and replacement commands; they are not voter turnout or counted votes.', 'Included encrypted commands are not counted votes.', 'Application verification is not an independent verifier PASS.'],
     };
   }
 
@@ -198,7 +244,9 @@ export class MaciService {
     const user = await this.db.appUser.findUnique({ where: { usernameKey: username.normalize('NFKC').toLocaleLowerCase('en-US') } });
     if (!user || user.status !== 'ACTIVE') throw new ForbiddenException({ code: 'MACI_USER_INACTIVE', message: 'The account is not active.' });
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
-    if (!election || election.status !== 'REGISTRATION') throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration is not open.' });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    if (election.deploymentInstanceId !== 'legacy') throw new ForbiddenException({ code: 'MACI_SELF_SERVICE_APPROVAL_REQUIRED', message: 'This election requires a voter participation request and admin review.' });
+    await this.requireRegistrationWindow(election);
     const row = await this.db.maciEligibility.upsert({
       where: { electionId_userId: { electionId, userId: user.id } },
       create: { electionId, userId: user.id }, update: {},
@@ -207,12 +255,71 @@ export class MaciService {
     return { ...row, username: user.username };
   }
 
+  async requestParticipation(cookie: string | undefined, electionIdInput: string) {
+    const user = await this.auth.authenticate(cookie);
+    if (user.role !== 'USER') throw new ForbiddenException({ code: 'MACI_VOTER_REQUIRED', message: 'A voter account is required.' });
+    const electionId = idSchema.parse(electionIdInput);
+    const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    await this.requireRegistrationWindow(election);
+    try {
+      return await this.db.maciParticipationRequest.create({ data: { electionId, userId: user.id }, select: { id: true, status: true, requestedAt: true, reviewedAt: true } });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+        return this.db.maciParticipationRequest.findUniqueOrThrow({ where: { electionId_userId: { electionId, userId: user.id } }, select: { id: true, status: true, requestedAt: true, reviewedAt: true } });
+      }
+      throw error;
+    }
+  }
+
+  async myParticipation(cookie: string | undefined, electionIdInput: string) {
+    const user = await this.auth.authenticate(cookie);
+    const electionId = idSchema.parse(electionIdInput);
+    const election = await this.db.maciElection.findUnique({ where: { id: electionId }, select: { id: true } });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    const row = await this.db.maciParticipationRequest.findUnique({ where: { electionId_userId: { electionId, userId: user.id } }, select: { id: true, status: true, requestedAt: true, reviewedAt: true } });
+    return { status: row?.status ?? 'NOT_REGISTERED', request: row };
+  }
+
+  async participationRequests(cookie: string | undefined, electionIdInput: string) {
+    await this.auth.admin(cookie);
+    const electionId = idSchema.parse(electionIdInput);
+    return this.db.maciParticipationRequest.findMany({ where: { electionId }, orderBy: { requestedAt: 'desc' }, select: { id: true, status: true, requestedAt: true, reviewedAt: true, user: { select: { username: true } } } });
+  }
+
+  async reviewParticipation(cookie: string | undefined, electionIdInput: string, requestIdInput: string, decision: 'APPROVED' | 'REJECTED') {
+    const admin = await this.auth.admin(cookie);
+    const electionId = idSchema.parse(electionIdInput);
+    const requestId = idSchema.parse(requestIdInput);
+    const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    await this.requireRegistrationWindow(election);
+    try { return await this.db.$transaction(async tx => {
+      const row = await tx.maciParticipationRequest.findUnique({ where: { id: requestId } });
+      if (!row || row.electionId !== electionId || row.status !== 'PENDING') throw new ConflictException({ code: 'MACI_REQUEST_NOT_PENDING', message: 'Participation request is not pending.' });
+      const voter = await tx.appUser.findUnique({ where: { id: row.userId }, select: { status: true, role: true } });
+      if (!voter || voter.status !== 'ACTIVE' || voter.role !== 'USER') throw new ForbiddenException({ code: 'MACI_USER_INACTIVE', message: 'The voter account is not active.' });
+       // The chain/deployment gate ran just before the transaction. Keep RPC
+       // calls out of the transaction while enforcing the wall-clock cutoff.
+       if (BigInt(Math.floor(Date.now() / 1000)) >= BigInt(election.startTimestamp)) throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration closed at poll start.' });
+      const updated = await tx.maciParticipationRequest.updateMany({ where: { id: requestId, status: 'PENDING' }, data: { status: decision, reviewedAt: new Date(), reviewedById: admin.id } });
+      if (updated.count !== 1) throw new ConflictException({ code: 'MACI_REQUEST_NOT_PENDING', message: 'Participation request was already reviewed.' });
+      if (decision === 'APPROVED') await tx.maciEligibility.upsert({ where: { electionId_userId: { electionId, userId: row.userId } }, create: { electionId, userId: row.userId }, update: { status: 'ELIGIBLE' } });
+      return tx.maciParticipationRequest.findUniqueOrThrow({ where: { id: requestId }, select: { id: true, status: true, requestedAt: true, reviewedAt: true } });
+    }, { isolationLevel: 'Serializable' }); }
+    catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') throw new ConflictException({ code: 'MACI_REQUEST_CONCURRENT_REVIEW', message: 'Participation request was reviewed concurrently.' });
+      throw error;
+    }
+  }
+
   async issue(cookie: string | undefined, electionIdInput: string, body: unknown) {
     const user = await this.auth.authenticate(cookie);
     const electionId = idSchema.parse(electionIdInput);
     const publicKey = publicKeySchema.parse(body);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
-    if (!election || election.status !== 'REGISTRATION') throw new ConflictException({ code: 'MACI_REGISTRATION_CLOSED', message: 'Registration is not open.' });
+    if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    await this.requireRegistrationWindow(election);
     const eligibility = await this.db.maciEligibility.findUnique({ where: { electionId_userId: { electionId, userId: user.id } } });
     if (!eligibility || eligibility.status !== 'ELIGIBLE') throw new ForbiddenException({ code: 'MACI_NOT_ELIGIBLE', message: 'The account is not eligible.' });
     await this.verifyDeployment({ chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock });
@@ -259,10 +366,18 @@ export class MaciService {
 
 @Controller('v1/maci')
 export class MaciController {
-  constructor(@Inject(MaciService) private readonly maci: MaciService, @Inject(MaciRelayService) private readonly relay: MaciRelayService, @Inject(MaciRegistrationRelay) private readonly registration: MaciRegistrationRelay, @Inject(MaciJoinRelay) private readonly join: MaciJoinRelay, @Inject(MaciAuditService) private readonly audit: MaciAuditService) {}
-  @Post('admin/elections') configure(@Headers('cookie') cookie: string | undefined, @Body() body: unknown) { return this.maci.configure(cookie, body); }
+  constructor(@Inject(MaciService) private readonly maci: MaciService, @Inject(MaciDeploymentService) private readonly deployment: MaciDeploymentService, @Inject(MaciRelayService) private readonly relay: MaciRelayService, @Inject(MaciRegistrationRelay) private readonly registration: MaciRegistrationRelay, @Inject(MaciJoinRelay) private readonly join: MaciJoinRelay, @Inject(MaciAuditService) private readonly audit: MaciAuditService, @Inject(MaciProofJobs) private readonly proofJobs: MaciProofJobs) {}
+  @Post('admin/elections') create(@Headers('cookie') cookie: string | undefined, @Headers('idempotency-key') key: string | undefined, @Body() body: unknown) { return this.deployment.create(cookie, key, body); }
+  @Post('admin/elections/import') configure(@Headers('cookie') cookie: string | undefined, @Body() body: unknown) { return this.maci.configure(cookie, body); }
+  @Get('admin/deployments/:jobId') deploymentStatus(@Headers('cookie') cookie: string | undefined, @Param('jobId') jobId: string) { return this.deployment.status(cookie, jobId); }
+  @Get('admin/deployments') recentDeployments(@Headers('cookie') cookie: string | undefined) { return this.deployment.recent(cookie); }
   @Post('admin/elections/:id/status') setStatus(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.setStatus(cookie, id, body); }
   @Get('elections') list(@Headers('cookie') cookie: string | undefined) { return this.maci.list(cookie); }
+  @Post('elections/:id/participation') requestParticipation(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.requestParticipation(cookie, id); }
+  @Get('elections/:id/my-participation') myParticipation(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.myParticipation(cookie, id); }
+  @Get('admin/elections/:id/requests') participationRequests(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.participationRequests(cookie, id); }
+  @Post('admin/elections/:id/requests/:requestId/approve') approve(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Param('requestId') requestId: string) { return this.maci.reviewParticipation(cookie, id, requestId, 'APPROVED'); }
+  @Post('admin/elections/:id/requests/:requestId/reject') reject(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Param('requestId') requestId: string) { return this.maci.reviewParticipation(cookie, id, requestId, 'REJECTED'); }
   @Get('admin/elections/:id/monitor') monitor(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.maci.monitor(cookie, id); }
   @Post('admin/elections/:id/eligibility') assign(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.assign(cookie, id, body); }
   @Post('elections/:id/authorization') issue(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.maci.issue(cookie, id, body); }
@@ -272,6 +387,8 @@ export class MaciController {
   @Post('elections/:id/joins') submitJoin(@Headers('cookie') cookie: string | undefined, @Headers('idempotency-key') key: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.join.submit(id, body, key, cookie); }
   @Get('joins/:id') joinStatus(@Param('id') id: string) { return this.join.status(id); }
   @Post('admin/elections/:id/audit') publishAudit(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.audit.publish(cookie, id, body); }
+  @Get('admin/elections/:id/proof-job') proofJob(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.proofJobs.status(cookie, id); }
+  @Post('admin/elections/:id/proof-job/approve') approveProofJob(@Headers('cookie') cookie: string | undefined, @Param('id') id: string) { return this.proofJobs.approve(cookie, id); }
   @Post('admin/elections/:id/configuration') publishConfiguration(@Headers('cookie') cookie: string | undefined, @Param('id') id: string, @Body() body: unknown) { return this.audit.publishConfiguration(cookie, id, body); }
   @Get('elections/:id/audit') publicAudit(@Param('id') id: string) { return this.audit.publicEvidence(id); }
   @Get('elections/:id/configuration') publicConfiguration(@Param('id') id: string) { return this.audit.publicConfiguration(id); }
@@ -281,5 +398,5 @@ export class MaciController {
   @Get('messages/:id') messageStatus(@Param('id') id: string) { return this.relay.status(id); }
 }
 
-@Module({ imports: [InfrastructureModule, AuthModule], controllers: [MaciController], providers: [MaciService, MaciRelayService, MaciRegistrationRelay, MaciJoinRelay, MaciAuditService] })
+@Module({ imports: [InfrastructureModule, AuthModule], controllers: [MaciController], providers: [MaciService, { provide: 'MACI_SERVICE', useExisting: MaciService }, MaciDeploymentService, MaciRelayService, MaciRegistrationRelay, MaciJoinRelay, MaciAuditService, MaciProofJobs] })
 export class MaciModule {}

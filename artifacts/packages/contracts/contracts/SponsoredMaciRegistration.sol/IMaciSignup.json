@@ -1,0 +1,44 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "IMaciSignup",
+  "sourceName": "packages/contracts/contracts/SponsoredMaciRegistration.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "x",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "y",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct IMaciSignup.PublicKey",
+          "name": "publicKey",
+          "type": "tuple"
+        },
+        {
+          "internalType": "bytes",
+          "name": "policyData",
+          "type": "bytes"
+        }
+      ],
+      "name": "signUp",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/packages/contracts/contracts/SponsoredMaciRegistration.sol",
+  "buildInfoId": "solc-0_8_37-21404f6be1a3242969ff332d64867b3ed3d39c70"
+}

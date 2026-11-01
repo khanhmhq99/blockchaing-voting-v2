@@ -66,15 +66,15 @@ export class MaciRelayService {
     const calldata = encodeFunctionData({ abi: pollAbi, functionName: 'publishMessage', args: [message, encryptionPublicKey] });
     const digest = keccak256(encodePacked(['uint256', 'address', 'bytes32'], [BigInt(election.chainId), pollAddress, keccak256(calldata)]));
     if (idempotencyKey !== digest) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_MISMATCH', message: 'Idempotency key does not match the encrypted command.' });
-    const prior = await this.db.maciEncryptedSubmission.findUnique({ where: { messageDigest: digest } });
+    const prior = await this.db.maciEncryptedSubmission.findUnique({ where: { deploymentInstanceId_messageDigest: { deploymentInstanceId: election.deploymentInstanceId, messageDigest: digest } } });
     if (prior) return this.publicStatus(await this.reconcile(prior.id));
     const account = sponsorAccount();
     const lane = `${election.chainId}:${account.address.toLowerCase()}`;
     const prepared = await this.db.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lane})::bigint)`;
-      const duplicate = await tx.maciEncryptedSubmission.findUnique({ where: { messageDigest: digest } });
+      const duplicate = await tx.maciEncryptedSubmission.findUnique({ where: { deploymentInstanceId_messageDigest: { deploymentInstanceId: election.deploymentInstanceId, messageDigest: digest } } });
       if (duplicate) return duplicate;
-      const active = await tx.maciEncryptedSubmission.findFirst({ where: { chainId: election.chainId, status: { in: ['PREPARED', 'PENDING'] } } });
+      const active = await tx.maciEncryptedSubmission.findFirst({ where: { chainId: election.chainId, deploymentInstanceId: election.deploymentInstanceId, status: { in: ['PREPARED', 'PENDING'] } } });
       if (active) throw new HttpException({ code: 'MACI_RELAY_BUSY', message: 'Another MACI transaction is pending.' }, 429);
       const nonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'pending' });
       const latestNonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' });
@@ -89,7 +89,7 @@ export class MaciRelayService {
       if (balance < gas * gasPrice) throw new ServiceUnavailableException({ code: 'MACI_BALANCE_LOW', message: 'MACI relayer lacks test funds.' });
       const raw = await account.signTransaction({ chainId: this.chain.config.CHAIN_ID, type: 'legacy', to: pollAddress, data: calldata, gas, gasPrice, nonce, value: 0n });
       return tx.maciEncryptedSubmission.create({ data: {
-        chainId: election.chainId, pollAddress: election.pollAddress, messageDigest: digest,
+        chainId: election.chainId, deploymentInstanceId: election.deploymentInstanceId, pollAddress: election.pollAddress, messageDigest: digest,
         messageData: parsed.data, encryptionKeyX: parsed.encryptionPublicKey.x, encryptionKeyY: parsed.encryptionPublicKey.y,
         status: 'PREPARED', transactionHash: keccak256(raw), rawTransaction: raw, calldataHash: keccak256(calldata), nonce,
       } });
@@ -136,6 +136,7 @@ export class MaciRelayService {
     }
     const latestNonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' });
     if (latestNonce > row.nonce) return this.db.maciEncryptedSubmission.update({ where: { id }, data: { status: 'PENDING', errorCode: 'MACI_NONCE_CONSUMED' } });
+    await this.chain.requireLocalContract(row.pollAddress as Address);
     try {
       await createWalletClient({ transport: http(this.chain.config.RPC_URL, { timeout: 10_000, retryCount: 0 }) }).sendRawTransaction({ serializedTransaction: raw });
       return this.db.maciEncryptedSubmission.update({ where: { id }, data: { status: 'PENDING', errorCode: null } });

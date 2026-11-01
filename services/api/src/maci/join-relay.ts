@@ -62,7 +62,7 @@ export class MaciJoinRelay {
     const calldata = encodeFunctionData({ abi: pollAbi, functionName: 'joinPoll', args: [nullifier, key, rootIndex, proof, '0x', '0x'] });
     const digest = keccak256(encodePacked(['uint256', 'address', 'bytes32'], [BigInt(election.chainId), pollAddress, keccak256(calldata)]));
     if (idempotencyKey !== digest) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_MISMATCH', message: 'Idempotency key does not match the joining proof.' });
-    const prior = await this.db.maciPollJoinSubmission.findUnique({ where: { joinDigest: digest } });
+    const prior = await this.db.maciPollJoinSubmission.findUnique({ where: { deploymentInstanceId_joinDigest: { deploymentInstanceId: election.deploymentInstanceId, joinDigest: digest } } });
     if (prior) return this.view(await this.reconcile(prior.id));
     if (await this.chain.client.readContract({ address: pollAddress, abi: pollAbi, functionName: 'pollNullifiers', args: [nullifier] })) throw new ConflictException({ code: 'MACI_ALREADY_JOINED', message: 'This credential has already joined the poll.' });
     const valid = await this.chain.client.readContract({ address: pollAddress, abi: pollAbi, functionName: 'verifyJoiningPollProof', args: [nullifier, rootIndex, key, proof] });
@@ -71,9 +71,9 @@ export class MaciJoinRelay {
     const lane = `${election.chainId}:${account.address.toLowerCase()}`;
     const prepared = await this.db.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lane})::bigint)`;
-      const duplicate = await tx.maciPollJoinSubmission.findUnique({ where: { joinDigest: digest } });
+      const duplicate = await tx.maciPollJoinSubmission.findUnique({ where: { deploymentInstanceId_joinDigest: { deploymentInstanceId: election.deploymentInstanceId, joinDigest: digest } } });
       if (duplicate) return duplicate;
-      const active = await tx.maciPollJoinSubmission.findFirst({ where: { chainId: election.chainId, status: { in: ['PREPARED', 'PENDING'] } } });
+      const active = await tx.maciPollJoinSubmission.findFirst({ where: { chainId: election.chainId, deploymentInstanceId: election.deploymentInstanceId, status: { in: ['PREPARED', 'PENDING'] } } });
       if (active) throw new HttpException({ code: 'MACI_JOIN_RELAY_BUSY', message: 'Another joining proof is pending.' }, 429);
       const nonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'pending' });
       if (nonce !== await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' })) throw new ServiceUnavailableException({ code: 'MACI_EXTERNAL_PENDING', message: 'Join sponsor has a pending transaction.' });
@@ -84,7 +84,7 @@ export class MaciJoinRelay {
       if (await this.chain.client.getBalance({ address: account.address }) < gas * gasPrice) throw new ServiceUnavailableException({ code: 'MACI_BALANCE_LOW', message: 'Join sponsor lacks test funds.' });
       const raw = await account.signTransaction({ chainId: Number(election.chainId), type: 'legacy', to: pollAddress, data: calldata, value: 0n, gas, gasPrice, nonce });
       return tx.maciPollJoinSubmission.create({ data: {
-        chainId: election.chainId, pollAddress: election.pollAddress, joinDigest: digest,
+        chainId: election.chainId, deploymentInstanceId: election.deploymentInstanceId, pollAddress: election.pollAddress, joinDigest: digest,
         publicKeyX: input.publicKey.x, publicKeyY: input.publicKey.y, nullifier: input.nullifier,
         status: 'PREPARED', transactionHash: keccak256(raw), rawTransaction: raw, calldataHash: keccak256(calldata), nonce,
       } });
@@ -126,6 +126,7 @@ export class MaciJoinRelay {
     }
     const latestNonce = await this.chain.client.getTransactionCount({ address: account.address, blockTag: 'latest' });
     if (latestNonce > row.nonce) return this.db.maciPollJoinSubmission.update({ where: { id }, data: { status: 'PENDING', errorCode: 'MACI_NONCE_CONSUMED' } });
+    await this.chain.requireLocalContract(row.pollAddress as Address);
     try {
       await createWalletClient({ transport: http(this.chain.config.RPC_URL, { timeout: 10_000, retryCount: 0 }) }).sendRawTransaction({ serializedTransaction: raw });
       return this.db.maciPollJoinSubmission.update({ where: { id }, data: { status: 'PENDING', errorCode: null } });

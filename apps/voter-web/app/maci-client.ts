@@ -28,7 +28,8 @@ function keypairFromSecret(secret: string) {
 }
 
 export function createMaciCredential() {
-  const pair = new Keypair(new PrivateKey(random256()));
+  // The pinned MACI SDK draws randomness through the browser Web Crypto adapter.
+  const pair = new Keypair();
   return { secret: pair.privateKey.serialize(), publicKeyX: pair.publicKey.raw[0].toString(), publicKeyY: pair.publicKey.raw[1].toString() };
 }
 
@@ -88,7 +89,7 @@ export function encryptMaciVote(args: {
   const stateIndex = BigInt(args.pollStateIndex);
   if (stateIndex < 1n || stateIndex >= 2n ** 50n) throw new Error('Invalid poll state index.');
   const voter = keypairFromSecret(args.secret);
-  const ephemeral = new Keypair(new PrivateKey(random256()));
+  const ephemeral = new Keypair();
   const coordinator = new PublicKey([BigInt(args.coordinatorKeyX), BigInt(args.coordinatorKeyY)]);
   const command = new VoteCommand(stateIndex, voter.publicKey, BigInt(args.candidateIndex), 1n, BigInt(args.nonce), BigInt(args.pollId), randomField());
   const signed = command.sign(voter.privateKey);

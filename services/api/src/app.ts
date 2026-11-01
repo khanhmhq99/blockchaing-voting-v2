@@ -10,15 +10,19 @@ import { MaciModule } from './maci/module.js';
 @Catch()
 export class SafeExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
+    const schemaMissing = typeof error === 'object' && error !== null && 'code' in error && (error.code === 'P2021' || error.code === 'P2022');
     const status = error instanceof ZodError ? 400 : error instanceof HttpException ? error.getStatus() : 503;
     const raw = error instanceof HttpException ? error.getResponse() : null;
     const detail = typeof raw === 'object' && raw !== null && 'code' in raw && 'message' in raw && typeof raw.code === 'string' && /^[A-Z_]{3,48}$/.test(raw.code) && typeof raw.message === 'string' && raw.message.length <= 200
       ? { code: raw.code, message: raw.message }
       : null;
-    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: detail ?? {
+    host.switchToHttp().getResponse<{ status(n: number): { json(v: unknown): void } }>().status(status).json({ error: detail ?? (schemaMissing ? {
+      code: 'DATABASE_SCHEMA_NOT_READY',
+      message: 'Database schema is missing a required migration.',
+    } : {
       code: status === 503 ? 'DEPENDENCY_UNAVAILABLE' : 'REQUEST_REJECTED',
       message: status === 503 ? 'Service is temporarily unavailable.' : 'The request is invalid or the election state changed.',
-    } });
+    }) });
   }
 }
 

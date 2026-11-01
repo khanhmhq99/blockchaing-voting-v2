@@ -22,5 +22,14 @@ export function databaseOptions(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export function chainConfig(env: NodeJS.ProcessEnv = process.env) {
-  return z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().positive(), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
+  const config = z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().positive(), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
+  const rpc = new URL(config.RPC_URL);
+  if (config.CHAIN_ID !== 31337 || rpc.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(rpc.hostname) || rpc.username || rpc.password || rpc.pathname !== '/' || rpc.search || rpc.hash) {
+    throw new Error('Hardhat Local chain 31337 and a loopback HTTP RPC are required.');
+  }
+  if ((env.MACI_RPC_URL && env.MACI_RPC_URL !== config.RPC_URL) ||
+      (env.NEXT_PUBLIC_MACI_RPC_URL && env.NEXT_PUBLIC_MACI_RPC_URL !== config.RPC_URL)) {
+    throw new Error('API, coordinator, and browser must use the same Hardhat Local RPC.');
+  }
+  return config;
 }

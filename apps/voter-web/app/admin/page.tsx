@@ -1,2 +1,2 @@
-import { redirect } from 'next/navigation';
-export default function AdminPage() { redirect('/admin/maci'); }
+import { MaciAdminPanel } from '../maci-admin-panel';
+export default function AdminPage() { return <MaciAdminPanel view="dashboard" />; }

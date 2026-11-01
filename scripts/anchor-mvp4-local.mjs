@@ -16,7 +16,12 @@ const ids = args['candidate-ids'].split(',');
 if (deployment.chainId !== 31337 || !Array.isArray(deployment.candidates) || ids.length !== deployment.candidates.length || new Set(ids).size !== ids.length || ids.some(id => !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))) throw new Error('Invalid local deployment or candidate identifiers');
 const rpcUrl = process.env.MACI_RPC_URL;
 const signerKey = process.env.DEPLOYER_PRIVATE_KEY;
-if (rpcUrl !== 'http://127.0.0.1:8545' || !/^0x[0-9a-fA-F]{64}$/.test(signerKey ?? '')) throw new Error('Local RPC or synthetic signer is unavailable');
+let localRpc = false;
+try {
+  const parsed = new URL(rpcUrl);
+  localRpc = parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname) && !parsed.username && !parsed.password && parsed.pathname === '/' && !parsed.search && !parsed.hash;
+} catch { /* Reject malformed RPC URLs. */ }
+if (!localRpc || !/^0x[0-9a-fA-F]{64}$/.test(signerKey ?? '')) throw new Error('Local RPC or synthetic signer is unavailable');
 const provider = new JsonRpcProvider(rpcUrl);
 if (Number((await provider.getNetwork()).chainId) !== 31337) throw new Error('Refusing a nonlocal chain');
 const wallet = new Wallet(signerKey, provider);

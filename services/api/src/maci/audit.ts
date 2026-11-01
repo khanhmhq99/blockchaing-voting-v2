@@ -87,8 +87,34 @@ function mutableTuple(value: unknown): unknown {
 export class MaciAuditService {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService, @Inject(ChainService) private readonly chain: ChainService, @Inject(AuthService) private readonly auth: AuthService) {}
 
-  async publish(cookie: string | undefined, electionIdInput: string, body: unknown) {
+  async publish(cookie: string | undefined, electionIdInput: string, body: unknown, proofJobId?: string) {
     await this.auth.admin(cookie);
+    const { electionId, files, manifest } = await this.verifyEvidence(electionIdInput, body);
+    const record = await this.db.$transaction(async tx => {
+      const current = await tx.maciElection.findUniqueOrThrow({ where: { id: electionId } });
+      if (current.status !== 'CLOSED') fail('MACI_STATUS_CHANGED');
+      if (proofJobId) {
+        const claimed = await tx.maciProofJob.updateMany({ where: { id: proofJobId, electionId, status: 'READY', snapshotHash: manifest.snapshotBlockHash }, data: { status: 'PUBLISHED', stage: 'PUBLISHED' } });
+        if (claimed.count !== 1) fail('MACI_PROOF_NOT_READY');
+      }
+      const created = await tx.maciAuditRecord.create({ data: { electionId, ...files, snapshotBlock: BigInt(manifest.snapshotBlock), snapshotHash: manifest.snapshotBlockHash } });
+      await tx.maciElection.update({ where: { id: electionId }, data: { status: 'VERIFIED' } });
+      return created;
+    }, { isolationLevel: 'Serializable' });
+    let configurationPublication: 'PUBLISHED' | 'PENDING' = 'PENDING';
+    const deploymentJob = await this.db.maciDeploymentJob.findUnique({ where: { electionId }, select: { deployment: true } });
+    const deployment = deploymentJob?.deployment;
+    if (deployment && typeof deployment === 'object' && !Array.isArray(deployment) && typeof deployment.configurationJson === 'string' && typeof deployment.configurationSha256 === 'string') {
+      try {
+        await this.publishConfiguration(cookie, electionId, { configurationJson: deployment.configurationJson, configurationSha256: deployment.configurationSha256 });
+        configurationPublication = 'PUBLISHED';
+      } catch { /* Preserve verified tally and show candidate-binding publication as pending. */ }
+    }
+    return { electionId, status: 'VERIFIED', configurationPublication, snapshotBlock: record.snapshotBlock.toString(), snapshotHash: record.snapshotHash, tally: manifest.tally };
+  }
+
+  // Shared by the isolated worker and the authenticated publication endpoint.
+  async verifyEvidence(electionIdInput: string, body: unknown) {
     const electionId = z.uuid().parse(electionIdInput);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
     if (!election || election.status !== 'CLOSED') fail('MACI_NOT_CLOSED');
@@ -165,14 +191,7 @@ export class MaciAuditService {
     const tallyData = tally as Parameters<typeof sdk.verify>[0]['tallyData'];
     const commitments = sdk.generateTallyCommitments({ tallyData, voteOptionTreeDepth: 3 });
     if (!await sdk.verify({ maciAddress: election.maciAddress, pollId: BigInt(election.pollId), tallyData, tallyCommitments: commitments, totalVoteOptions: tally.results.tally.length, voteOptionTreeDepth: 3, signer })) fail('MACI_TALLY_VERIFICATION_FAILED');
-    const record = await this.db.$transaction(async tx => {
-      const current = await tx.maciElection.findUniqueOrThrow({ where: { id: electionId } });
-      if (current.status !== 'CLOSED') fail('MACI_STATUS_CHANGED');
-      const created = await tx.maciAuditRecord.create({ data: { electionId, ...files, snapshotBlock: BigInt(manifest.snapshotBlock), snapshotHash: manifest.snapshotBlockHash } });
-      await tx.maciElection.update({ where: { id: electionId }, data: { status: 'VERIFIED' } });
-      return created;
-    }, { isolationLevel: 'Serializable' });
-    return { electionId, status: 'VERIFIED', snapshotBlock: record.snapshotBlock.toString(), snapshotHash: record.snapshotHash, tally: manifest.tally };
+    return { electionId, files, manifest };
   }
 
   async publicEvidence(electionIdInput: string) {

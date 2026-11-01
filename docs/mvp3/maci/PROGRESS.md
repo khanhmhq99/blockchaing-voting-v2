@@ -1,5 +1,143 @@
 # MACI MVP 3 progress and recovery point
 
+## 2026-10-26 empty proof-job response repair
+
+When no proof job existed, `MaciProofJobs.status()` returned `null`; the local
+NestJS Express adapter sends an empty body for null responses. The shared web
+`api()` helper maps an empty/non-JSON response to `{}`, and the Admin panel
+previously cast that object to `ProofJob`, rendering `status` and `stage` as
+`undefined`. The endpoint now returns `{ job: null }` or `{ job: {...} }`.
+The Admin panel validates this envelope and treats malformed responses as a
+load error instead of rendering missing fields. The change does not affect
+proof generation, verification, or publication rules. Repository-local Node
+24.21.0 `typecheck`, `lint`, `build:api`, `build:web`, and `git diff --check`
+exited 0; twelve focused proof-job tests passed under normal Windows execution.
+No live authenticated HTTP request was made for this repair.
+
+## 2026-10-26 Admin result-action visibility
+
+The Admin result page previously rendered its approval action only when an
+election was `CLOSED` and its automated proof job was `READY`. At every other
+stage the action disappeared without an explanation. The page now displays
+the approval action disabled with a reason until the chain and audit gates
+pass, distinguishes a job-status API failure from no job, and shows the
+four-file manual fallback only for a closed election with no job or a job
+requiring reconciliation. API approval and audit gates are unchanged.
+`npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:web`, and
+`git diff --check` exited 0 using repository-local Node 24.21.0. No live
+publication or chain transaction was performed for this UI clarification.
+
+## 2026-10-26 automated proof job integration (pending live gate)
+
+The owner subsequently explicitly authorized the additive managed database
+migration. `npm.cmd run db:migrate:deploy` exited 0 and applied only
+`202610260001_maci_proof_jobs`; `db:migrate:status` then reported the schema
+up to date and `db:check` exited 0. A fresh Hardhat Local process and the
+separate proof worker were started for a smoke test. The first worker tick
+exposed a historical election whose deployment block exceeded the fresh
+chain head; the worker now skips such stale deployments before requesting
+that block. After the fix, the worker completed repeated idle ticks with no
+error. The synthetic chain and worker were stopped after the smoke test.
+No eligible election was deployed on that chain, so no proof generation,
+on-chain proof transaction, artifact staging, or Admin publication was
+observed. Full end-to-end Option D validation remains open.
+
+A later fresh synthetic election deployment through the authenticated Admin
+API reached `READY` (deployment job `9133cf34-1666-4015-8522-a80d22a2c6b7`).
+After a local Hardhat time jump past the poll end, the worker created its
+durable proof job and reached `RUNNING/COORDINATOR`. The coordinator checkpoint
+reached `signups-merged`, but the local Hardhat/API/worker sessions were
+interrupted during proof generation. No completed proof, proof transaction,
+four-file artifact set, audit approval or `VERIFIED` state was observed.
+The stale job was conditionally moved to `RECONCILIATION_REQUIRED` with
+`MACI_PROOF_WORKER_RESTART` after its heartbeat exceeded 120 seconds; a
+read-only database check confirmed that state. This job must not be retried
+against a newly started in-memory Hardhat chain. The observed deployment,
+job-claim and fail-closed recovery stages passed; complete proof/publication
+acceptance remains unverified.
+
+Option D now has an additive `MaciProofJob` schema/migration, a separate proof
+worker, a shared audit verification entry point, an authenticated Admin approval
+endpoint, and a minimal result-page status/action. The worker detects local
+chain closure after the configured confirmation depth, creates a unique job,
+runs the existing coordinator in a child process with no database credentials,
+stages the four public artifacts, waits for snapshot finality, and verifies
+the existing audit checks before marking a job `READY`. Approval reruns audit
+verification and atomically records the audit, job publication and election
+`VERIFIED` state. Uncertain interrupted coordinator transactions stay in
+`RECONCILIATION_REQUIRED` rather than being automatically rebroadcast.
+
+Observed: repository-local Node 24.21.0 `prisma:generate`, `prisma:validate`,
+`typecheck`, `lint`, `build:api`, `build:web`, and `git diff --check` exited 0.
+The focused proof-job tests passed under normal Windows execution; the restricted
+sandbox failed before test execution with `uv_os_get_passwd ENOMEM`.
+Before the owner's explicit authorization, `db:migrate:status` found only
+`202610260001_maci_proof_jobs` pending, and automatic approval review rejected
+`db:migrate:deploy` because a managed database write had not been separately
+authorized. The later authorized migration result is recorded above.
+
+## 2026-10-26 registration retry message
+
+The voter-facing message "registration is waiting for a service or chain and will retry" maps several transient codes, including sponsor nonce pending, another registration in the sponsor lane, expired authorization, or dependency/RPC unavailability. Read-only checks found `/v1/health` available, `/v1/config` reporting chain 31337, and the local RPC reporting chain `0x7a69`; these checks do not identify the failing per-voter request. The automatic registration step runs only while the election is `REGISTRATION`. The UI now keeps automatic-workflow errors separate from other errors and hides a registration retry message after the election leaves `REGISTRATION`, avoiding a false retry promise during `OPEN`.
+
+Observed with repository-local Node 24.21.0: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:web`, and `git diff --check` exited 0. No authenticated registration request, managed database write, chain transaction, or key material was used during this diagnosis.
+
+## 2026-10-25 encrypted-command status clarification
+
+The owner reported a synthetic voter seeing both an initial `PENDING` notice and a later on-chain confirmation for transaction `0x3c0525f2e3ad5f2bb45c1c31be87cca7f309995ba8bdb0c5814a2aad77486d8e`, which appeared to mean voting failed. Read-only Hardhat RPC inspection found receipt status `0x1` in block 24, destination Poll `0xBA12646CC07ADBe43F8bD25D83FB628D29C8A762`, and a `PublishMessage` event signature from that Poll. The API `INCLUDED` state additionally requires a matching encrypted message and public key in the event. Thus the encrypted command was included on chain; it does not prove that the choice is counted in the final tally. That requires coordinator processing and proof-verified tally evidence after the poll closes.
+
+The voter UI no longer retains the initial `PENDING` notice after the status changes. Its current-status panel now explicitly distinguishes pending transaction, failed transaction, and on-chain inclusion, and the submission toast points to that panel. On Windows with repository-local Node 24.21.0, `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:web`, and `git diff --check` exited 0. The RPC calls were read-only; no new transaction, coordinator run, tally proof, audit publication, or individual-vote counting claim was made.
+
+## 2026-10-25 stale Hardhat block election status
+
+The owner reported a synthetic election scheduled for 2026-10-25 21:30 to 2026-10-26 21:11 Asia/Saigon still marked as outside the voting window. Read-only checks at 2026-10-25 22:05:06 Asia/Saigon found API chain 31337 and Hardhat RPC at `127.0.0.1:8545`, with latest block 20 timestamped 21:21:42 Asia/Saigon. The API derived `REGISTRATION`/`OPEN` only from that last block timestamp, which can remain stale when no transaction is mined. For verified Hardhat Local elections, list/status transition checks now use the later of wall time and latest block time. The existing on-chain deployment verification and credential/join requirements remain in place; nonlocal manual status checks retain block time.
+
+Observed on Windows, Git revision `271d911`, repository-local Node 24.21.0: `npm.cmd run typecheck`, `npm.cmd run lint`, and `git diff --check` exited 0; `node --import tsx --test tests/maci-election-clock.test.ts` exited 0 (one synthetic service test confirming a stale block still transitions a verified local election to `OPEN`). The first test attempt in the restricted sandbox failed before running tests with `uv_os_get_passwd ENOMEM`; the authorized normal Windows retry passed. The RPC and API checks were read-only. No authenticated live election-list response, ballot submission, managed database write, or blockchain transaction was exercised for this repair.
+
+## 2026-10-25 Hardhat Local only configuration
+
+The ignored local `.env` now selects chain 31337 and `http://127.0.0.1:8545` for API, coordinator, and browser. API configuration rejects chain 97, non-loopback RPCs, and inconsistent RPC variables. MACI deployment validation rejects chain 97 election records before contract reads. Registration, join, and message relays recheck the actual chain and destination bytecode before broadcasting signed transactions. Browser joining checks chain ID and contract code; admin approval and voter actions visibly reject historical chain 97 elections. The coordinator and verifier accept only local 31337 inputs. Existing deployment files, database rows, credentials, and chain 97 research remain preserved. The local wrapper now fails if its existing coordinator key file is absent instead of generating a replacement.
+
+Observed with repository-local Node 24.21.0: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:web`, `npm.cmd run build:contracts`, and `npm.cmd exec hardhat compile` exited 0. Focused API tests passed (4 cases) and Chromium admin tests passed (3 cases). The first tsx and Hardhat attempts failed before loading tests/contracts in the restricted sandbox with `uv_os_get_passwd ENOMEM`; normal Windows retries exited 0. Local RPC returned `eth_chainId=0x7a69`, block 0; an empty-code address returned `0x`, and a disconnected loopback port failed. All 23 preserved local deployment files were checked against the current chain; none had MACI bytecode at its recorded address. No deployment, database write, BSC connection, transaction, key regeneration, or full voting/proof/tally run was performed. A fresh election deployment must be created through the existing admin workflow after starting the complete local stack.
+
+## 2026-10-25 Admin review button follow-up
+
+The owner clarified that clicking `PhÃª duyá»‡t` produced no action. The direct cause in the UI was `disabled={busy || !canReview}` on pending-request buttons: when a registration-era row remained in the database but its deployment was unavailable or the registration window had closed, the browser suppressed click events entirely. Pending buttons now remain clickable unless a mutation is in progress. A click opens confirmation when review is allowed; otherwise it immediately shows a safe reason and checks the public API chain ID so an API-on-97 / election-on-31337 mismatch is explicit. The backend still rejects review unless registration is open and the deployment validates; no eligibility bypass was introduced. The local guide now says to keep separate chain, API and web terminals running with matching `maci-local-env.mjs` wrappers. `npm.cmd run build:web`, `npm.cmd run typecheck`, `npm.cmd run lint`, `git diff --check`, and the Chromium Admin review test (2 cases, including blocked-click feedback and zero POSTs) exited 0. No live services or managed database writes were used.
+
+## 2026-10-25 Admin participation approval repair
+
+The Admin review path was inspected against the accepted self-service plan, ADR 0012 and the MACI threat model. Two application defects were corrected: review held a serializable database transaction open during a second contract/RPC verification, and the browser reported approval as failed if its follow-up request-list GET failed after a successful POST. Review still verifies the deployment and chain time immediately before the transaction, checks the wall-clock cutoff inside it, and atomically changes a pending request plus eligibility. The browser now uses the POST result to update the row, reports success even if the subsequent list refresh is unavailable, and explains when approval is disabled because registration has closed or the current chain cannot verify the deployment. No cutoff or chain-health bypass was added.
+
+Observed on Windows with repository-local Node 24.21.0: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:api`, `npm.cmd run build:web`, `node --test tests/maci-admin-review.test.mjs`, and `node --import tsx --test tests/maci-review.test.ts` all exited 0. The first tsx attempt in the restricted sandbox exited 1 before tests with `uv_os_get_passwd ENOMEM`; the authorized normal Windows retry exited 0. The browser test uses synthetic mocked API responses and verifies that a successful approval POST remains successful when the next GET returns 503. The API test uses an in-memory fake transaction, verifies one chain gate outside the transaction, one eligibility grant and duplicate rejection; it is not a Supabase test. Local API, web and Hardhat ports were closed during inspection, so a live approved voter journey was not run. No managed data or blockchain state was changed.
+
+## 2026-10-25 automatic-workflow diagnostic follow-up
+
+The owner reported the generic automatic MACI retry message. Read-only checks found that the repository's ignored `.env` has no `NEXT_PUBLIC_MACI_RPC_URL`, while joining a poll requires it in the browser. Ports 3000, 3001, 3003, 8545 and 8546 were closed during inspection, so the prior browser failure could not be attributed to a specific API or chain call. The frontend now maps stable API/client failure codes to sanitized, step-specific messages. Missing browser RPC, lost or mismatched credentials, invalid network/proof and operator configuration failures stop retries; transient relay/dependency failures retain bounded retries. The joining client explicitly checks `eth_chainId`, and the local guide points to the existing wrapper that supplies matching API/browser RPC settings. No private key or raw exception text is shown. `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build:web`, and four focused tests exited 0. No live registration or poll join was run.
+
+## 2026-10-25 browser-local automatic credentials
+
+On base revision `271d9112d4e4c97c5403819c62a7203a49c655ef`, the voter frontend now generates a MACI v3 key pair with the SDK after election eligibility, persists the private key only in origin-local IndexedDB, and checks it against the registered public key before joining or voting. The store key binds account, election, chain and MACI address; an atomic insert refuses overwrite. Lost or mismatched registered credentials stop the flow without creating a replacement. The existing API and contracts were not changed for this task. Static export builds now emit hashed-script CSP in HTML and `out/_headers`; see [local credentials](LOCAL_CREDENTIALS.md) for host requirements and remaining risks. Existing encrypted backup envelopes require a separate migration path.
+
+Observed on Windows with repository-local Node 24.21.0: `npm.cmd run typecheck` exit 0; `npm.cmd run lint` exit 0 after fixing one unused catch binding; `npm.cmd run build --workspace @voting/web` and `npm.cmd run build:web` exit 0 after correcting the post-build output path; `node --test tests/maci-workflow.test.ts tests/maci-credential-store.test.mjs` exit 0 (3 tests, including Chromium concurrent inserts and account/election/deployment isolation). The generated vote HTML contains CSP meta and `_headers` contains `frame-ancestors` (both readback checks true). No live API, Supabase, chain transaction, real ballot or managed migration was exercised for this change. Pre-existing uncommitted owner work remains in the tree.
+
+## 2026-10-24 Supabase migration and synthetic automatic creation
+
+Authorized continuation on Git revision `271d9112d4e4c97c5403819c62a7203a49c655ef`, Windows, repository-local Node 24.21.0 and PostgreSQL 17.11 tools. Both configured database URLs identify Supabase project `igyjcwppnkysckhirfpk`, database `postgres`, private schema `voting`, session pooler `aws-0-ap-northeast-2.pooler.supabase.com:5432`, verified TLS. No credentials were printed. `.env` remains configured for BSC Testnet chain 97. Process-only overrides selected Hardhat 31337; no BSC transaction was sent.
+
+**Checkpoint 1 audit:** Five repository migrations existed. Live `_prisma_migrations` showed only `202610160001_maci_baseline` and `202610160002_maci_runtime_grants` complete. Pending in dependency order were `202610180001_public_configuration`, `202610240001_election_self_service`, and `202610240002_local_chain_instances`. The expected predecessor tables, runtime role and old index names existed. Counts before and after migration for `MaciElection`, `MaciAuditRecord`, `MaciEncryptedSubmission`, `MaciPollJoinSubmission` were 6, 3, 11, 8. The first migration adds nullable audit fields and a limited update grant; the second creates two RLS-protected tables with foreign/unique keys; the third adds default `legacy` instance columns and replaces uniqueness indexes. Old-row uniqueness is retained because every existing row receives `legacy`. The index replacement can briefly lock writes. No migration deletes rows or drops a table.
+
+**Checkpoint 2 backup and apply:** Ignored custom-format `pg_dump` archives of full `voting` and `public._prisma_migrations` were saved under `.tools/supabase-backup/20261024-before-self-service/`. `pg_restore --list` passed. Schema backup: 88,883 B, SHA-256 `9ea2dfec00551fdbcf1041bc4d39ecd2ae4e8b24a1b2ccd70048f8de8bb270e4`; history: 3,423 B, `cbe4709d9faaea92d0fe887c8b508cd1ef29172012bec35001a06b9167be8884`. `node scripts/prisma.mjs migrate deploy` exited 0 and applied all three pending migrations. Readback verified history, tables, columns, foreign/unique keys, indexes and three runtime RLS policies on each new table; Prisma status exited 0.
+
+**Checkpoint 3 runtime:** Persistent Hardhat 31337 ran at `127.0.0.1:8546` and NestJS at `127.0.0.1:3003`, using Supabase plus process-only local keys/RPC from `scripts/maci-local-env.mjs`. `/v1/health` and `/v1/config` returned 200; config reported chain 31337 and one confirmation. The BSC `.env` was not edited.
+
+**Checkpoint 4 observed creation:** Authenticated Admin API creation and idempotent replay returned one synthetic job/election, `365cb35e-3552-4520-836b-3ce21cd9161c`, which reached `READY`/`COMPLETE`. Direct Hardhat `eth_getCode` returned 7,068 bytes for MACI `0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e` and 685 bytes for Poll `0xBA12646CC07ADBe43F8bD25D83FB628D29C8A762`. A joined Supabase read matched job status, election ID, instance ID and both addresses. Admin election list reported `REGISTRATION`/`AVAILABLE`; deployment list, participation-request list and monitor returned 200, with monitor chain `AVAILABLE` and deployment `READY`.
+
+The first monitor call returned 503. Isolated Prisma reads found missing runtime `SELECT` and RLS policy on existing `MaciCoordinatorRun` and `MaciProofSubmission`; the other monitor reads passed. Before repair, a second ignored backup under `.tools/supabase-backup/20261024-before-monitor-grants/` captured the new job: schema 103,979 B, SHA-256 `408ef858e3583237cc798aac6e678bf7629bc58c1a1c1f05c362fa69c046aa20`; history 3,719 B, `fc52aed7fae8de2074e7170060ec3dceb639bc09038538d536e40eab1c48c954`. New additive migration `202610240003_maci_monitor_runtime_reads` grants only SELECT and matching RLS policies. Prisma deploy exited 0. All nine isolated monitor reads and the live Admin monitor then passed; `db:check` and Prisma status exited 0 with all six migrations applied.
+
+Negative checks: a second API configured as chain 97 against the local Hardhat RPC rejected creation over HTTP with 403 `MACI_LOCAL_ONLY`; it sent no BSC transaction. Direct exception-filter checks with simulated Prisma P2021/P2022 returned 503 `DATABASE_SCHEMA_NOT_READY`. A live Supabase table was not removed to induce this error. The current Supabase run used Admin API, not a fresh browser session, participation decision or full voter/proof/tally cycle. Earlier isolated-local browser/proof evidence remains in [enhancement progress](../../enhancements/election-self-service/PROGRESS.md).
+
+**Checkpoint 5 limits:** Automatic deployment accepts Hardhat 31337 only. BSC Testnet requires a separately reviewed chain-97 deployment and coordinator path, gas/bytecode/proof compatibility, and outstanding dependency/security/privacy gates in the MACI plan. No public-network deployment address was written. The ignored backups contain private application data; `pg_restore --list` checked their structure, but a full restore on another database was not attempted. The local Hardhat and API processes were stopped after testing, so their addresses are now historical and must not be treated as live deployments. Final readback showed 7 elections (the prior 6 plus this synthetic one), 3 audit records, 11 encrypted submissions and 8 joins. The two new monitor grants were confirmed SELECT-only, with RLS enabled and one SELECT policy each; neither INSERT nor UPDATE was granted.
+
 
 +## 2026-10-17 current runtime and failure verification
 
@@ -35,13 +173,13 @@ Focused manual probes (ignored `local-integration/failure-probes.mjs`, exit 0) o
 
 Architecture cleanup: obsolete MVP 1/2 tests, deployment/benchmark/seed scripts, BasicVoting/GaslessVoting source and ABIs, and legacy shared types were moved to `research/legacy-mvp1-mvp2/` for thesis comparison; active compile and package scripts now target MACI only. Historical documentation, deployment records and benchmarks remain. `npm.cmd install --package-lock-only --ignore-scripts --offline` exited 0 after removing obsolete test-only dependencies. `npm.cmd run build`, `npm.cmd run lint`, `npm.cmd run prisma:validate`, `npm.cmd run typecheck`, and `git diff --check` exited 0 after a seed-script type fix and EOF whitespace correction. The build compiled only the two custom MACI contracts and generated 12 Next.js routes. `git diff --check` reported non-failing CRLF normalization warnings on three pre-existing Windows files.
 
-Final Supabase checks: `npm.cmd run db:migrate:status` exited 0 with exactly two migrations and “Database schema is up to date”; `npm.cmd run db:check` exited 0 with the runtime role's Prisma connection and MACI reads. Both were read-only at this checkpoint.
+Final Supabase checks: `npm.cmd run db:migrate:status` exited 0 with exactly two migrations and â€œDatabase schema is up to dateâ€; `npm.cmd run db:check` exited 0 with the runtime role's Prisma connection and MACI reads. Both were read-only at this checkpoint.
 
 Final repository checks: `git status --short` inspected the existing uncommitted work; no commit or tag was made. `git diff --check` exited 0. A focused scan of 91 untracked text/source files found no replacement characters, trailing whitespace or missing final newline. README and the eight MACI Markdown files had no missing relative link target. A broader heuristic scan reported one bracket expression in the historical `docs/mvp3/BALLOT_SPECIFICATION.md` as a false Markdown-link match; no file was changed for that non-link.
 
 At final handoff, read-only HTTP probes returned 200 from Hardhat RPC (current head block 49), NestJS health and Next.js `/maci`; all three local processes were still running. The completed election's immutable audit snapshot remains block 31. If those terminal sessions stop, restart a new Hardhat chain and deploy fresh contracts; the addresses above cannot be reused on a restarted in-memory chain.
 
-BSC Testnet read-only gate: the configured RPC returned chain ID 97, live head 137061048, block gas limit 99,902,345 and gas price 100,000,000 wei; the existing deployer had enough **testnet** balance to cover the observed local deployment gas at that quote. `eth_estimateGas` without broadcasting returned 1,083,446 gas for `SponsoredMaciRegistration` (5,650-byte creation code) and 334,309 gas for `OpenMaciPollJoinPolicy` (1,318-byte creation code). The official [BNB Chain RPC documentation](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/) identifies BSC Testnet as chain 97; the [BSC client changelog](https://github.com/bnb-chain/bsc/blob/master/CHANGELOG.md) records the Testnet Cancun/Tycho activation. These observations cover two custom contracts only, not the complete upstream deployment/proof path. The [upstream MACI repository](https://github.com/privacy-ethereum/maci) is archived/read-only as of August 2026. `npm.cmd audit --omit=dev --json` exited 1 and reported 54 production-tree advisories: 28 high, 13 moderate, 13 low, zero critical; `@maci-protocol/contracts` and `@maci-protocol/sdk` have high-severity transitive paths and no audit fix offered. The later offline lockfile-only command's “0 vulnerabilities” output did not query the advisory service and does **not** clear this gate.
+BSC Testnet read-only gate: the configured RPC returned chain ID 97, live head 137061048, block gas limit 99,902,345 and gas price 100,000,000 wei; the existing deployer had enough **testnet** balance to cover the observed local deployment gas at that quote. `eth_estimateGas` without broadcasting returned 1,083,446 gas for `SponsoredMaciRegistration` (5,650-byte creation code) and 334,309 gas for `OpenMaciPollJoinPolicy` (1,318-byte creation code). The official [BNB Chain RPC documentation](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/) identifies BSC Testnet as chain 97; the [BSC client changelog](https://github.com/bnb-chain/bsc/blob/master/CHANGELOG.md) records the Testnet Cancun/Tycho activation. These observations cover two custom contracts only, not the complete upstream deployment/proof path. The [upstream MACI repository](https://github.com/privacy-ethereum/maci) is archived/read-only as of August 2026. `npm.cmd audit --omit=dev --json` exited 1 and reported 54 production-tree advisories: 28 high, 13 moderate, 13 low, zero critical; `@maci-protocol/contracts` and `@maci-protocol/sdk` have high-severity transitive paths and no audit fix offered. The later offline lockfile-only command's â€œ0 vulnerabilitiesâ€ output did not query the advisory service and does **not** clear this gate.
 
 **Testnet deployment is withheld.** The local app flow passed, but the 28 high dependency findings require runtime-reachability review, M0 provenance/security findings remain unresolved, the upstream repository is archived, and no chain-97 MACI deployment command has been implemented/verified. Current Supabase runtime role can read both the identity-linked registration public key and the anonymous join public key/nullifier, allowing a database reader to link those records; the coordinator also holds a key capable of decrypting individual commands. This is a known privacy/trust limitation for any demonstration that purports to hide choices from those operators and requires explicit separation/review before such a claim or deployment. The read-only RPC/estimation probes are not evidence that the full deployment and proof workflow is safe or operational on BSC Testnet. No `.env` public deployment address was written and no BSC transaction was broadcast. Exact next task: triage high advisories and the privacy/trust boundaries against the synthetic demonstration, then implement and dry-run a chain-97 guarded deployment/coordinator path only if no known serious issue compromises it; preserve this completed local checkpoint.
 
@@ -59,9 +197,9 @@ At this intermediate checkpoint the next task was synthetic write/read operation
 
 ## Historical pre-reset implementation checkpoints (superseded by the current checkpoint above)
 
-**Owner decision (2026-10-15):** M0 = `RESEARCH_REVIEW_DEFERRED — OWNER ACCEPTED PROTOTYPE RISKS`; M1 = `COMPLETED — LOCAL SYNTHETIC ELECTION VERIFIED`; M2–M7 = `PROCEED WITH IMPLEMENTATION`. This applies to a synthetic-data thesis prototype. None of the unfinished M0 checks is marked passed. The older M0 blocking language below is historical.
+**Owner decision (2026-10-15):** M0 = `RESEARCH_REVIEW_DEFERRED â€” OWNER ACCEPTED PROTOTYPE RISKS`; M1 = `COMPLETED â€” LOCAL SYNTHETIC ELECTION VERIFIED`; M2â€“M7 = `PROCEED WITH IMPLEMENTATION`. This applies to a synthetic-data thesis prototype. None of the unfinished M0 checks is marked passed. The older M0 blocking language below is historical.
 
-**Historical 2026-10-15 implementation checkpoint:** M2 contract path is locally demonstrated; M2–M6 application source is implemented but awaits local PostgreSQL and browser runtime integration evidence. [SponsoredMaciRegistration.sol](../../../packages/contracts/contracts/SponsoredMaciRegistration.sol) binds an issuer EIP-712 authorization to an opaque one-use ticket and the exact MACI public key, then calls upstream MACI `signUp` itself because upstream policy enforcement sees only the sponsor address and policy bytes. [OpenMaciPollJoinPolicy.sol](../../../packages/contracts/contracts/OpenMaciPollJoinPolicy.sol) allows the upstream poll's membership proof and per-poll nullifier to enforce joining independently of sponsor address. Three synthetic keys signed by one issuer successfully registered and joined through one sponsor on a local Hardhat chain. The local probe rejected direct signup, forged or mismatched authorization, expired authorization, ticket replay and duplicate key. A full one-sponsor regression run also published three encrypted messages, generated and submitted processing/tally proofs, and verified `[1,2,0]` on chain. Its gas/stage evidence is in ignored `research/mvp3/maci/probe-output/local-m2/one-sponsor-full-proof/events.ndjson`.
+**Historical 2026-10-15 implementation checkpoint:** M2 contract path is locally demonstrated; M2â€“M6 application source is implemented but awaits local PostgreSQL and browser runtime integration evidence. [SponsoredMaciRegistration.sol](../../../packages/contracts/contracts/SponsoredMaciRegistration.sol) binds an issuer EIP-712 authorization to an opaque one-use ticket and the exact MACI public key, then calls upstream MACI `signUp` itself because upstream policy enforcement sees only the sponsor address and policy bytes. [OpenMaciPollJoinPolicy.sol](../../../packages/contracts/contracts/OpenMaciPollJoinPolicy.sol) allows the upstream poll's membership proof and per-poll nullifier to enforce joining independently of sponsor address. Three synthetic keys signed by one issuer successfully registered and joined through one sponsor on a local Hardhat chain. The local probe rejected direct signup, forged or mismatched authorization, expired authorization, ticket replay and duplicate key. A full one-sponsor regression run also published three encrypted messages, generated and submitted processing/tally proofs, and verified `[1,2,0]` on chain. Its gas/stage evidence is in ignored `research/mvp3/maci/probe-output/local-m2/one-sponsor-full-proof/events.ndjson`.
 
 **2026-10-15 local deployment follow-up:** [deploy-maci-local.mjs](../../../scripts/deploy-maci-local.mjs) now deploys the custom policies, upstream MACI v3 contracts, four hash-checked verifying keys and a `FULL` poll to a persistent Hardhat RPC. It refuses any chain other than 31337 and uses the isolated pinned Hardhat 2 MACI runtime because the product workspace's Hardhat 3 does not expose the deployment SDK's `getContractFactory` interface. An actual synthetic deployment exited 0: ignored `research/mvp3/maci/probe-output/deployments/synthetic_1792079296/deployment.json`, 18 deployer transactions, 31,109,499 observed local EVM gas, poll ID 0, first deployment block 19. This local chain was then stopped; the addresses are ephemeral and are not product/testnet configuration. A focused synthetic credential/backup/encryption probe also exited 0, including wrong-passphrase rejection. Desktop registration status refresh was corrected to use the read endpoint.
 

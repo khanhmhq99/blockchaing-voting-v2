@@ -16,10 +16,12 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = process.argv[2];
 if (!configPath) throw new Error('Usage: node scripts/maci-coordinator.mjs <public-election-config.json>');
 const config = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
-if (!config || !/^[a-z0-9_-]{1,64}$/.test(config.runId) || ![31337, 97].includes(config.chainId) || !/^0x[0-9a-fA-F]{40}$/.test(config.maciAddress) || !/^(0|[1-9][0-9]*)$/.test(config.pollId) || !Number.isSafeInteger(config.deploymentBlock) || config.deploymentBlock < 0 || !Number.isInteger(config.voteOptions) || config.voteOptions < 2 || config.voteOptions > 125) throw new Error('Invalid MACI coordinator configuration');
+if (!config || !/^[a-z0-9_-]{1,64}$/.test(config.runId) || config.chainId !== 31337 || !/^0x[0-9a-fA-F]{40}$/.test(config.maciAddress) || !/^(0|[1-9][0-9]*)$/.test(config.pollId) || !Number.isSafeInteger(config.deploymentBlock) || config.deploymentBlock < 0 || !Number.isInteger(config.voteOptions) || config.voteOptions < 2 || config.voteOptions > 125) throw new Error('MACI coordinator requires a Hardhat Local 31337 election');
 const coordinatorSecret = process.env.MACI_COORDINATOR_PRIVATE_KEY;
 const proverKey = process.env.MACI_PROVER_PRIVATE_KEY;
 const rpcUrl = process.env.MACI_RPC_URL || process.env.RPC_URL;
+const rpc = rpcUrl && new URL(rpcUrl);
+if (!rpc || rpc.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(rpc.hostname) || rpc.username || rpc.password || rpc.pathname !== '/' || rpc.search || rpc.hash) throw new Error('MACI coordinator requires a loopback Hardhat RPC');
 if (!coordinatorSecret || !/^macisk\.[0-9a-fA-F]{64}$/.test(coordinatorSecret) || !proverKey || !/^0x[0-9a-fA-F]{64}$/.test(proverKey) || !rpcUrl) throw new Error('MACI coordinator secrets or RPC are not configured');
 if ([process.env.MACI_ISSUER_PRIVATE_KEY, process.env.MACI_RELAYER_PRIVATE_KEY, process.env.MACI_REGISTRATION_RELAYER_PRIVATE_KEY, process.env.MACI_JOIN_RELAYER_PRIVATE_KEY].some(value => value?.toLowerCase() === proverKey.toLowerCase())) throw new Error('MACI prover EVM key must be separate from issuer and relayers');
 const output = path.join(repo, 'research/mvp3/maci/probe-output/coordinator', config.runId);
@@ -58,10 +60,14 @@ async function events(provider, address, topic, fromBlock, toBlock) {
 async function main() {
   const provider = new JsonRpcProvider(rpcUrl, config.chainId);
   if (Number((await provider.getNetwork()).chainId) !== config.chainId) throw new Error('RPC chain mismatch');
+  if (await provider.getCode(config.maciAddress) === '0x') throw new Error('MACI contract missing on Hardhat Local');
   const signer = new NonceManager(new Wallet(proverKey, provider));
   const maci = contracts.MACI__factory.connect(config.maciAddress, signer);
   const pollAddresses = await maci.getPoll(BigInt(config.pollId));
   if (pollAddresses.poll === '0x0000000000000000000000000000000000000000') throw new Error('MACI poll does not exist');
+  for (const address of [pollAddresses.poll, pollAddresses.messageProcessor, pollAddresses.tally]) {
+    if (await provider.getCode(address) === '0x') throw new Error('MACI poll deployment is missing on Hardhat Local');
+  }
   const poll = contracts.Poll__factory.connect(pollAddresses.poll, signer);
   const coordinator = new Keypair(PrivateKey.deserialize(coordinatorSecret));
   const onChainKey = await poll.coordinatorPublicKey();

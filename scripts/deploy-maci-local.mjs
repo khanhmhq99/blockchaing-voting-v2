@@ -16,15 +16,18 @@ if (!config || !/^[a-z0-9_-]{1,64}$/.test(config.runId) || config.chainId !== 31
   throw new Error('Invalid local synthetic MACI poll configuration or voting window');
 }
 const rpcUrl = process.env.MACI_RPC_URL || process.env.RPC_URL;
+const rpc = rpcUrl && new URL(rpcUrl);
+if (!rpc || rpc.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(rpc.hostname) || rpc.username || rpc.password || rpc.pathname !== '/' || rpc.search || rpc.hash) throw new Error('MACI deployment requires a loopback Hardhat RPC');
 const deployerKey = process.env.DEPLOYER_PRIVATE_KEY;
 const issuerKey = process.env.MACI_ISSUER_PRIVATE_KEY;
 const registrationKey = process.env.MACI_REGISTRATION_RELAYER_PRIVATE_KEY;
 const joinKey = process.env.MACI_JOIN_RELAYER_PRIVATE_KEY;
 const messageKey = process.env.MACI_RELAYER_PRIVATE_KEY;
 const coordinatorKey = process.env.MACI_COORDINATOR_PRIVATE_KEY;
+const coordinatorPublic = process.env.MACI_COORDINATOR_PUBLIC_KEY;
 const evmKeys = [deployerKey, issuerKey, registrationKey, joinKey, messageKey];
-if (!rpcUrl || evmKeys.some(key => !/^0x[0-9a-fA-F]{64}$/.test(key ?? '')) || new Set(evmKeys.map(key => key.toLowerCase())).size !== evmKeys.length || !/^macisk\.[0-9a-fA-F]{64}$/.test(coordinatorKey ?? '')) {
-  throw new Error('Separate local deployer, issuer, registration, join, message and coordinator keys are required');
+if (!rpcUrl || evmKeys.some(key => !/^0x[0-9a-fA-F]{64}$/.test(key ?? '')) || new Set(evmKeys.map(key => key.toLowerCase())).size !== evmKeys.length || (!coordinatorPublic && !/^macisk\.[0-9a-fA-F]{64}$/.test(coordinatorKey ?? ''))) {
+  throw new Error('Separate local deployment signers and a MACI coordinator public key are required');
 }
 const output = path.join(root, 'research/mvp3/maci/probe-output/deployments', config.runId);
 if (fs.existsSync(output)) throw new Error('Deployment run ID already exists; preserve its evidence');
@@ -37,7 +40,7 @@ const hardhat = require(path.join(isolated, '@maci-protocol/contracts/node_modul
 const sdk = require(path.join(isolated, '@maci-protocol/sdk'));
 const domainobjs = require(path.join(isolated, '@maci-protocol/domainobjs'));
 const contracts = require(path.join(isolated, '@maci-protocol/contracts'));
-const { Keypair, PrivateKey, VerifyingKey } = domainobjs;
+const { Keypair, PrivateKey, PublicKey, VerifyingKey } = domainobjs;
 const { ContractFactory, JsonRpcProvider, Wallet } = hardhat.ethers;
 const artifactDir = path.join(root, 'research/mvp3/maci/artifacts');
 const expectedVkeys = {
@@ -72,7 +75,8 @@ async function main() {
   const registrationSponsor = new Wallet(registrationKey, provider);
   const joinSponsor = new Wallet(joinKey, provider);
   const messageSponsor = new Wallet(messageKey, provider);
-  const coordinator = new Keypair(PrivateKey.deserialize(coordinatorKey));
+  const coordinatorKeyObject = coordinatorPublic ? PublicKey.deserialize(coordinatorPublic) : new Keypair(PrivateKey.deserialize(coordinatorKey)).publicKey;
+  if (coordinatorKey && coordinatorPublic && new Keypair(PrivateKey.deserialize(coordinatorKey)).publicKey.serialize() !== coordinatorPublic) throw new Error('Coordinator public/private key mismatch');
   const firstBlock = await provider.getBlockNumber();
   const registration = await new ContractFactory(localArtifact('SponsoredMaciRegistration').abi, localArtifact('SponsoredMaciRegistration').bytecode, deployer).deploy(issuer.address);
   await registration.waitForDeployment();
@@ -97,7 +101,7 @@ async function main() {
     maciAddress: maci.maciContractAddress,
     pollStartTimestamp: config.startTimestamp, pollEndTimestamp: config.endTimestamp,
     tallyProcessingStateTreeDepth: 5, voteOptionTreeDepth: 3, messageBatchSize: 25,
-    stateTreeDepth: 14, coordinatorPublicKey: coordinator.publicKey,
+    stateTreeDepth: 14, coordinatorPublicKey: coordinatorKeyObject,
     mode: sdk.EMode.FULL, policyContractAddress: await joinPolicy.getAddress(),
     relayers: [joinSponsor.address, messageSponsor.address],
     voteOptions: config.candidates.length, initialVoiceCredits: 1, signer: deployer,
@@ -107,7 +111,7 @@ async function main() {
   if (deployedPoll.poll.toLowerCase() !== poll.pollContractAddress.toLowerCase()) throw new Error('Deployed poll address mismatch');
   const pollContract = contracts.Poll__factory.connect(deployedPoll.poll, provider);
   const publicKey = await pollContract.coordinatorPublicKey();
-  if (publicKey.x !== coordinator.publicKey.raw[0] || publicKey.y !== coordinator.publicKey.raw[1]) throw new Error('Coordinator binding mismatch');
+  if (publicKey.x !== coordinatorKeyObject.raw[0] || publicKey.y !== coordinatorKeyObject.raw[1]) throw new Error('Coordinator binding mismatch');
   const lastBlock = await provider.getBlockNumber();
   const transactions = [];
   for (let number = firstBlock + 1; number <= lastBlock; number += 1) {

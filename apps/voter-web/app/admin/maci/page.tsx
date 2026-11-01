@@ -1,3 +1,2 @@
-import { MaciAdminPanel } from '../../maci-admin-panel';
-
-export default function AdminMaciPage() { return <MaciAdminPanel />; }
+import { redirect } from 'next/navigation';
+export default function AdminMaciPage() { redirect('/admin/elections'); }

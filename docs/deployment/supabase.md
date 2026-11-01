@@ -75,7 +75,7 @@ In terminal 3:
 npm.cmd run dev:web
 ```
 
-Open `http://localhost:3000`. `APP_ORIGIN` must match the web origin. The API binds loopback by default; containers may set `API_HOST=0.0.0.0` behind authenticated infrastructure/HTTPS and restrictive network ingress. `NEXT_PUBLIC_API_URL` is a build-time public origin; rebuild the static export when it changes. Build with `npm.cmd run build`; the API entry is `dist/services/api/src/main.js`, frontend assets are `apps/voter-web/out`.
+Open `http://localhost:3000`. `APP_ORIGIN` must match the web origin. The API binds loopback by default; containers may set `API_HOST=0.0.0.0` behind authenticated infrastructure/HTTPS and restrictive network ingress. `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_MACI_RPC_URL` are build-time public origins; rebuild the static export when either changes. Build with `npm.cmd run build`; the API entry is `dist/services/api/src/main.js`, frontend assets are `apps/voter-web/out`. The build embeds a script-hash CSP into each HTML file and emits `out/_headers`; configure equivalent HTTP headers if the static host ignores `_headers`, especially `frame-ancestors`.
 
 ## MetaMask and workflow
 

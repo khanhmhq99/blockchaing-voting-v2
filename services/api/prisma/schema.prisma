@@ -24,6 +24,9 @@ model AppUser {
   auditEntries AdminActivity[] @relation("ActivityActor")
   maciEligibilities MaciEligibility[]
   maciRegistrations MaciRegistration[]
+  participationRequests MaciParticipationRequest[] @relation("ParticipationVoter")
+  reviewedParticipationRequests MaciParticipationRequest[] @relation("ParticipationReviewer")
+  deploymentJobs MaciDeploymentJob[]
 
   @@schema("voting")
 }
@@ -57,6 +60,7 @@ model AppSession {
 model MaciElection {
   id                  String @id @default(uuid()) @db.Uuid
   chainId             String
+  deploymentInstanceId String @default("legacy")
   maciAddress         String
   registrationAddress String
   pollAddress         String
@@ -78,9 +82,12 @@ model MaciElection {
   auditRecord          MaciAuditRecord?
   coordinatorRuns      MaciCoordinatorRun[]
   proofSubmissions     MaciProofSubmission[]
+  participationRequests MaciParticipationRequest[]
+  deploymentJob MaciDeploymentJob?
+  proofJob MaciProofJob?
 
-  @@unique([chainId, maciAddress])
-  @@unique([chainId, pollAddress])
+  @@unique([chainId, maciAddress, deploymentInstanceId])
+  @@unique([chainId, pollAddress, deploymentInstanceId])
   @@schema("voting")
 }
 
@@ -94,6 +101,47 @@ model MaciEligibility {
   user       AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([electionId, userId])
+  @@schema("voting")
+}
+
+// Account-side request history; never contains ballot choices or MACI private keys.
+model MaciParticipationRequest {
+  id String @id @default(uuid()) @db.Uuid
+  electionId String @db.Uuid
+  userId String @db.Uuid
+  status String @default("PENDING")
+  requestedAt DateTime @default(now()) @db.Timestamptz(6)
+  reviewedAt DateTime? @db.Timestamptz(6)
+  reviewedById String? @db.Uuid
+  election MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+  user AppUser @relation("ParticipationVoter", fields: [userId], references: [id], onDelete: Restrict)
+  reviewedBy AppUser? @relation("ParticipationReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@unique([electionId, userId])
+  @@index([electionId, status, requestedAt])
+  @@schema("voting")
+}
+
+// A claimed job is never automatically rerun after a crash: a transaction may have been submitted.
+model MaciDeploymentJob {
+  id String @id @default(uuid()) @db.Uuid
+  requestedById String @db.Uuid
+  idempotencyKey String
+  requestHash String
+  requestedConfig Json
+  status String @default("CREATING")
+  stage String @default("QUEUED")
+  genesisHash String
+  deployment Json?
+  diagnosticCode String?
+  electionId String? @unique @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  requestedBy AppUser @relation(fields: [requestedById], references: [id], onDelete: Restrict)
+  election MaciElection? @relation(fields: [electionId], references: [id], onDelete: Restrict)
+
+  @@unique([requestedById, idempotencyKey])
+  @@index([status, createdAt])
   @@schema("voting")
 }
 
@@ -128,8 +176,9 @@ model MaciRegistration {
 model MaciEncryptedSubmission {
   id                String @id @default(uuid()) @db.Uuid
   chainId           String
+  deploymentInstanceId String @default("legacy")
   pollAddress       String
-  messageDigest     String @unique
+  messageDigest     String
   messageData       Json
   encryptionKeyX    String
   encryptionKeyY    String
@@ -145,7 +194,8 @@ model MaciEncryptedSubmission {
   createdAt         DateTime @default(now()) @db.Timestamptz(6)
   updatedAt         DateTime @updatedAt @db.Timestamptz(6)
 
-  @@index([chainId, pollAddress, status, createdAt])
+  @@unique([deploymentInstanceId, messageDigest])
+  @@index([chainId, pollAddress, deploymentInstanceId, status, createdAt], map: "MaciEncryptedSubmission_instance_status_idx")
   @@schema("voting")
 }
 
@@ -153,8 +203,9 @@ model MaciEncryptedSubmission {
 model MaciPollJoinSubmission {
   id              String @id @default(uuid()) @db.Uuid
   chainId         String
+  deploymentInstanceId String @default("legacy")
   pollAddress     String
-  joinDigest      String @unique
+  joinDigest      String
   publicKeyX      String
   publicKeyY      String
   nullifier       String
@@ -170,9 +221,10 @@ model MaciPollJoinSubmission {
   createdAt       DateTime @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @db.Timestamptz(6)
 
-  @@unique([chainId, pollAddress, nullifier])
-  @@unique([chainId, pollAddress, publicKeyX, publicKeyY])
-  @@index([chainId, pollAddress, status, createdAt])
+  @@unique([deploymentInstanceId, joinDigest])
+  @@unique([chainId, pollAddress, deploymentInstanceId, nullifier], map: "MaciPollJoinSubmission_instance_nullifier_key")
+  @@unique([chainId, pollAddress, deploymentInstanceId, publicKeyX, publicKeyY], map: "MaciPollJoinSubmission_instance_publicKey_key")
+  @@index([chainId, pollAddress, deploymentInstanceId, status, createdAt], map: "MaciPollJoinSubmission_instance_status_idx")
   @@schema("voting")
 }
 
@@ -191,6 +243,31 @@ model MaciAuditRecord {
   verifiedAt    DateTime @default(now()) @db.Timestamptz(6)
   election      MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
 
+  @@schema("voting")
+}
+
+// Public evidence is staged here until an authenticated admin explicitly publishes it.
+model MaciProofJob {
+  id String @id @default(uuid()) @db.Uuid
+  electionId String @unique @db.Uuid
+  runId String @unique
+  status String @default("QUEUED")
+  stage String @default("QUEUED")
+  diagnosticCode String?
+  closingBlock BigInt
+  closingHash String
+  genesisHash String
+  snapshotBlock BigInt?
+  snapshotHash String?
+  manifestJson String?
+  eventsNdjson String?
+  proofsJson String?
+  tallyJson String?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  election MaciElection @relation(fields: [electionId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
   @@schema("voting")
 }
 
