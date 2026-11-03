@@ -7,6 +7,7 @@ import { ElectionCards } from './election-cards';
 import { ElectionOverview } from './election-overview';
 import { showToast } from './action-toast';
 import { maciStatusLabel } from './maci-status';
+import { transactionExplorerUrl } from './maci-network';
 
 type Election = { id: string; title: string; candidates: string[]; chainId: string; maciAddress: string; registrationAddress?: string; pollAddress: string; pollId: string; deploymentBlock: string; status: string; chainHealth?: string; startTimestamp: string; endTimestamp: string };
 type Job = { id: string; status: string; stage: string; diagnosticCode: string | null; electionId: string | null; deployment: { registrationAddress?: string; transactions?: { hash: string }[] } | null };
@@ -44,11 +45,11 @@ export function MaciAdminPanel({ view = 'dashboard', electionId }: { view?: 'das
   const [proofJobLoadError, setProofJobLoadError] = useState(false);
   const creationKey = useRef<string | null>(null);
   const selected = elections.find(election => election.id === selectedId);
-  const canReview = selected?.status === 'REGISTRATION' && selected.chainId === '31337' && selected.chainHealth === 'AVAILABLE';
+  const canReview = selected?.status === 'REGISTRATION' && selected.chainId === (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337') && selected.chainHealth === 'AVAILABLE';
   const canApproveProof = selected?.status === 'CLOSED' && selected.chainHealth === 'AVAILABLE' && proofJob?.status === 'READY' && !proofJobLoadError;
   const proofPublicationHint = proofJobLoadError ? 'Không tải được trạng thái proof job. Kiểm tra kết nối API rồi tải lại trang.'
     : selected?.status === 'REGISTRATION' || selected?.status === 'OPEN' ? 'Cuộc bỏ phiếu chưa đóng. Worker chỉ bắt đầu sau thời điểm kết thúc và khi block đóng đã đủ xác nhận.'
-      : selected?.chainHealth !== 'AVAILABLE' ? 'Không xác minh được deployment trên chuỗi hiện tại. Kiểm tra Hardhat RPC trước khi xử lý kết quả.'
+      : selected?.chainHealth !== 'AVAILABLE' ? 'Không xác minh được deployment trên chuỗi hiện tại. Kiểm tra RPC trước khi xử lý kết quả.'
         : !proofJob ? 'Chưa có proof job. Worker riêng phải đang chạy và chain phải có block đóng poll với đủ xác nhận.'
           : proofJob.status === 'READY' ? 'Bốn artifact đã qua kiểm toán. Admin có thể phê duyệt công bố; API sẽ xác minh lại trước khi chuyển sang VERIFIED.'
             : proofJob.status === 'RECONCILIATION_REQUIRED' ? 'Job đã dừng để đối chiếu. Kiểm tra checkpoint và giao dịch trên chuỗi; chỉ dùng phương án thủ công sau khi worker đã dừng.'
@@ -125,7 +126,7 @@ export function MaciAdminPanel({ view = 'dashboard', electionId }: { view?: 'das
   }
   async function review(requestId: string, decision: 'approve' | 'reject') {
     if (!selected) return;
-    if (selected.chainId !== '31337' || !canReview) throw new Error('MACI_CHAIN_MISMATCH');
+    if (selected.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337') || !canReview) throw new Error('MACI_CHAIN_MISMATCH');
     const updated = await api<Request>(`/maci/admin/elections/${selected.id}/requests/${requestId}/${decision}`, { method: 'POST' });
     setRequests(rows => rows.map(row => row.id === requestId ? { ...row, status: updated.status, reviewedAt: updated.reviewedAt } : row));
     const success = decision === 'approve' ? 'Đã phê duyệt yêu cầu tham gia.' : 'Đã từ chối yêu cầu tham gia.';
@@ -135,20 +136,20 @@ export function MaciAdminPanel({ view = 'dashboard', electionId }: { view?: 'das
   async function beginReview(request: Request, decision: 'approve' | 'reject') {
     if (!selected) return;
     setError('');
-    if (selected.chainId !== '31337') {
-      const reason = `Cuộc bỏ phiếu thuộc chain ${selected.chainId}; chỉ Hardhat Local 31337 được phép thao tác.`;
+    if (selected.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337')) {
+      const reason = `Cuộc bỏ phiếu thuộc chain ${selected.chainId}; bản web này đang dùng chain ${process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337'}.`;
       setError(reason); showToast('warning', reason); return;
     }
     if (canReview) { setReviewing({ request, decision }); return; }
     let reason = selected.status !== 'REGISTRATION'
       ? 'Thời gian đăng ký đã kết thúc; không thể phê duyệt yêu cầu này.'
-      : 'Không thể xác minh deployment MACI trên chuỗi hiện tại. Kiểm tra API và RPC; nếu Hardhat đã khởi động lại, hãy tạo cuộc bỏ phiếu mới.';
+      : 'Không thể xác minh deployment MACI trên chuỗi hiện tại. Kiểm tra API, RPC và địa chỉ contract của cuộc bỏ phiếu.';
     setError(reason);
     const toastId = showToast('warning', reason);
     if (selected.status === 'REGISTRATION') {
       try {
         const config = await api<{ chainId: number }>('/config');
-        if (String(config.chainId) !== selected.chainId) reason = `API đang kết nối chain ${config.chainId}, nhưng cuộc bỏ phiếu thuộc chain ${selected.chainId}. Hãy khởi động API và web với cùng cấu hình local.`;
+        if (String(config.chainId) !== selected.chainId) reason = `API đang kết nối chain ${config.chainId}, nhưng cuộc bỏ phiếu thuộc chain ${selected.chainId}. Hãy khởi động API và web với cùng cấu hình mạng.`;
       } catch { /* Keep the safe deployment-health explanation. */ }
     }
     setError(reason);
@@ -189,11 +190,11 @@ export function MaciAdminPanel({ view = 'dashboard', electionId }: { view?: 'das
     </div>}
     {(view === 'dashboard' || view === 'elections') && (loadingElections ? <div className="election-card-grid" role="status" aria-label="Đang tải cuộc bỏ phiếu">{[0, 1, 2].map(index => <div key={index} className="election-card skeleton-card" />)}</div> : !elections.length ? <EmptyState title="Chưa có cuộc bỏ phiếu nào" /> : <>
       <ElectionCards rows={elections} selectedId={selectedId} onSelect={setSelectedId} />
-      {selected && <ElectionOverview election={selected}><nav className="detail-links" aria-label="Quản lý cuộc bỏ phiếu"><a href={`/admin/elections/detail?id=${encodeURIComponent(selectedId)}`}>Xem thông tin</a><a href="/admin/elections/new">Tạo cuộc mới</a></nav>{selected.chainHealth !== 'AVAILABLE' && <Notice kind="error">Chưa thể kiểm tra cuộc bỏ phiếu trên chuỗi. Nếu mạng thử nghiệm đã khởi động lại, hãy tạo cuộc mới và giữ bản ghi này để đối chiếu.</Notice>}<details><summary>Thông tin kỹ thuật</summary><p>Chain {selected.chainId} · MACI {selected.maciAddress} · Đăng ký {selected.registrationAddress ?? job?.deployment?.registrationAddress ?? 'Xem giao dịch triển khai'} · Poll {selected.pollAddress} · Poll ID {selected.pollId} · Block triển khai {selected.deploymentBlock}</p>{job?.deployment?.transactions?.map(tx => <p key={tx.hash}><code>{tx.hash}</code></p>)}</details></ElectionOverview>}
+      {selected && <ElectionOverview election={selected}><nav className="detail-links" aria-label="Quản lý cuộc bỏ phiếu"><a href={`/admin/elections/detail?id=${encodeURIComponent(selectedId)}`}>Xem thông tin</a><a href="/admin/elections/new">Tạo cuộc mới</a></nav>{selected.chainHealth !== 'AVAILABLE' && <Notice kind="error">Chưa thể kiểm tra cuộc bỏ phiếu trên chuỗi. Kiểm tra RPC và địa chỉ contract, giữ bản ghi này để đối chiếu.</Notice>}<details><summary>Thông tin kỹ thuật</summary><p>Chain {selected.chainId} · MACI {selected.maciAddress} · Đăng ký {selected.registrationAddress ?? job?.deployment?.registrationAddress ?? 'Xem giao dịch triển khai'} · Poll {selected.pollAddress} · Poll ID {selected.pollId} · Block triển khai {selected.deploymentBlock}</p>{job?.deployment?.transactions?.map(tx => <p key={tx.hash}>{transactionExplorerUrl(selected.chainId, tx.hash) ? <a href={transactionExplorerUrl(selected.chainId, tx.hash)!} target="_blank" rel="noopener noreferrer" aria-label={`Xem giao dịch ${tx.hash} trên BscScan`}><code>{tx.hash}</code></a> : <code>{tx.hash}</code>}</p>)}</details></ElectionOverview>}
       </>)}
     {selected && (view === 'details' || view === 'participants' || view === 'results') && <ElectionOverview election={selected}><nav className="detail-links" aria-label="Quản lý cuộc bỏ phiếu"><a aria-current={view === 'details' ? 'page' : undefined} href={`/admin/elections/detail?id=${encodeURIComponent(selected.id)}`}>Thông tin</a><a aria-current={view === 'participants' ? 'page' : undefined} href={`/admin/elections/participants?id=${encodeURIComponent(selected.id)}`}>Người tham gia</a><a aria-current={view === 'results' ? 'page' : undefined} href={`/admin/elections/results?id=${encodeURIComponent(selected.id)}`}>Kết quả</a><a href="/admin/monitor">Giám sát</a></nav>{view === 'details' && <details><summary>Thông tin kỹ thuật</summary><p>Chain {selected.chainId} · MACI {selected.maciAddress} · Poll {selected.pollAddress} · Poll ID {selected.pollId} · Block {selected.deploymentBlock}</p></details>}</ElectionOverview>}
     {selected && view === 'participants' && <div className="app-card"><h2>Yêu cầu đăng ký</h2><p>{requests.filter(request => request.status === 'PENDING').length} chờ duyệt · {requests.filter(request => request.status === 'APPROVED').length} đã duyệt · {requests.filter(request => request.status === 'REJECTED').length} đã từ chối</p>
-      {!canReview && requests.some(request => request.status === 'PENDING') && <Notice kind="error">{selected.status !== 'REGISTRATION' ? 'Thời gian đăng ký đã kết thúc; các yêu cầu đang chờ không thể được phê duyệt cho cuộc bỏ phiếu này.' : 'Không thể xác minh deployment MACI trên chuỗi hiện tại. Kiểm tra API và RPC; nếu Hardhat đã khởi động lại, hãy tạo cuộc bỏ phiếu mới.'}</Notice>}
+      {!canReview && requests.some(request => request.status === 'PENDING') && <Notice kind="error">{selected.status !== 'REGISTRATION' ? 'Thời gian đăng ký đã kết thúc; các yêu cầu đang chờ không thể được phê duyệt cho cuộc bỏ phiếu này.' : 'Không thể xác minh deployment MACI trên chuỗi hiện tại. Kiểm tra API, RPC và địa chỉ contract của cuộc bỏ phiếu.'}</Notice>}
       <div className="election-toolbar"><div className="filter-tabs" role="group" aria-label="Lọc yêu cầu">{([['ALL', 'Tất cả'], ['PENDING', 'Chờ duyệt'], ['APPROVED', 'Đã duyệt'], ['REJECTED', 'Đã từ chối']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={requestFilter === value} className={requestFilter === value ? 'selected' : ''} onClick={() => setRequestFilter(value)}>{label}</button>)}</div><label className="visually-labeled">Tìm người tham gia<input type="search" value={requestSearch} onChange={event => setRequestSearch(event.target.value)} placeholder="Tên đăng nhập" /></label></div>
       {!visibleRequests.length ? <EmptyState title="Không có yêu cầu phù hợp" /> : <div className="table-wrap"><table className="app-table"><thead><tr><th>Người tham gia</th><th>Thời gian đăng ký</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visibleRequests.map(request => <tr key={request.id}><td>{request.user.username}</td><td>{new Date(request.requestedAt).toLocaleString('vi-VN')}</td><td><span className={`status-pill ${request.status === 'APPROVED' ? 'success' : request.status === 'REJECTED' ? 'error' : 'warning'}`}>{request.status === 'PENDING' ? 'Chờ phê duyệt' : request.status === 'APPROVED' ? 'Đã phê duyệt' : 'Đã từ chối'}</span></td><td>{request.status === 'PENDING' && <><button type="button" disabled={busy} onClick={() => void beginReview(request, 'approve')}>Phê duyệt</button><button type="button" disabled={busy} onClick={() => void beginReview(request, 'reject')}>Từ chối</button></>}</td></tr>)}</tbody></table></div>}
     </div>}

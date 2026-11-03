@@ -16,7 +16,7 @@ const joinAbi = [{ type: 'function', name: 'joinPoll', stateMutability: 'nonpaya
 ], outputs: [] }] as const;
 
 async function assertRpcChain(provider: JsonRpcProvider, chainId: string) {
-  if (chainId !== '31337') throw new Error('MACI_RPC_CHAIN_MISMATCH');
+  if (chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337')) throw new Error('MACI_RPC_CHAIN_MISMATCH');
   let actual: bigint;
   try { actual = BigInt(await provider.send('eth_chainId', [])); }
   catch { throw new Error('MACI_RPC_UNAVAILABLE'); }

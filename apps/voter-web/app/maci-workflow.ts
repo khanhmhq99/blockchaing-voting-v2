@@ -11,7 +11,7 @@ export function voteBlockReason(state: {
   joinStatus: string | undefined;
   joinIndex: string | null;
 }): string | null {
-  if (state.chainId !== '31337') return 'Chỉ Hardhat Local 31337 được phép bỏ phiếu trong bản thử nghiệm này.';
+  if (state.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337')) return 'Cuộc bỏ phiếu thuộc mạng khác với bản web đang chạy.';
   if (state.chainHealth !== 'AVAILABLE') return 'Không thể xác minh deployment MACI trên chuỗi hiện tại.';
   if (state.electionStatus !== 'OPEN') return 'Cuộc bỏ phiếu chưa mở hoặc đã kết thúc.';
   if (!state.eligible) return 'Tài khoản chưa được API xác nhận đủ điều kiện tham gia.';
@@ -28,6 +28,7 @@ export function voteBlockReason(state: {
 export function describeWorkflowFailure(step: Exclude<AutomaticStep, null>, cause: unknown): { message: string; retryable: boolean } {
   const record = cause && typeof cause === 'object' ? cause as { code?: unknown; message?: unknown } : {};
   const code = typeof record.code === 'string' ? record.code : typeof record.message === 'string' && /^MACI_[A-Z_]+$/.test(record.message) ? record.message : '';
+  if (code === 'MACI_TESTNET_DISABLED') return { message: 'BSC Testnet chưa được bật cho dịch vụ này. Hãy liên hệ người vận hành.', retryable: false };
   if (code === 'MACI_PUBLIC_RPC_NOT_CONFIGURED') return { message: 'Chưa cấu hình RPC công khai cho trình duyệt. Người vận hành cần đặt NEXT_PUBLIC_MACI_RPC_URL rồi khởi động hoặc build lại web.', retryable: false };
   if (['MACI_CREDENTIAL_MISSING', 'MACI_CREDENTIAL_MISMATCH', 'MACI_CREDENTIAL_INVALID', 'MACI_CREDENTIAL_STORAGE_UNAVAILABLE'].includes(code)) return { message: 'Không thể dùng khóa bỏ phiếu cục bộ. Hệ thống đã dừng thao tác để tránh đăng ký hoặc bỏ phiếu sai credential.', retryable: false };
   if (['MACI_REGISTRATION_CLOSED', 'MACI_POLL_NOT_OPEN'].includes(code)) return { message: 'Giai đoạn đăng ký hoặc bỏ phiếu đã thay đổi. Vui lòng tải lại trạng thái cuộc bầu cử.', retryable: false };

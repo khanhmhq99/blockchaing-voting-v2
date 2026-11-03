@@ -48,3 +48,6 @@ body,button,input,select,textarea,.app-shell{font-family:'Be Vietnam Pro',sans-s
 .election-overview details{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
 .election-overview details p{overflow-wrap:anywhere}
 @media(max-width:760px){.election-overview{padding:18px}.election-overview-heading{display:grid}.election-overview-heading .election-card-top{justify-content:flex-start}.election-facts{grid-template-columns:1fr}.election-card dl div{display:grid;gap:2px}.election-card dd{text-align:left}}
+.source-disclosure{padding:12px 20px;text-align:center;font-size:12px;background:#f5f7fb}
+.source-disclosure a{color:#1768b8;text-decoration:underline;text-underline-offset:2px}
+.source-disclosure a:focus-visible{outline:3px solid #be8427;outline-offset:3px}

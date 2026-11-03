@@ -5,7 +5,7 @@ const labels: Record<string, string> = {
   CLOSED: "Đã đóng",
   VERIFIED: "Đã xác minh",
   PENDING: "Đang xét duyệt",
-  APPROVED: "Đủ điều kiện tham gia",
+  APPROVED: "Đã phê duyệt",
   REJECTED: "Bị Từ chối",
   ISSUED: "Đã cấp quyền",
   PREPARED: "Đã chuẩn bị",

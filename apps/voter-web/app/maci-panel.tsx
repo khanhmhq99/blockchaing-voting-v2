@@ -162,7 +162,7 @@ export function MaciPanel({ view = 'dashboard', electionId }: { view?: 'dashboar
   }, [message?.id, message?.status]);
 
   useEffect(() => {
-    if (!active || active.chainId !== '31337' || !eligibility || loadedCredentialId !== currentCredentialId || !registrationMatches || credentialProblem === 'storage' || credentialProblem === 'mismatch' ||
+    if (!active || active.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337') || !eligibility || loadedCredentialId !== currentCredentialId || !registrationMatches || credentialProblem === 'storage' || credentialProblem === 'mismatch' ||
       (eligibility.registration && !credentialReady) || !active.eligible || active.chainHealth !== 'AVAILABLE' || workflowLock.current) return;
     const registration = eligibility?.registration?.status;
     const step = nextAutomaticStep({ electionStatus: active.status, chainHealth: active.chainHealth, eligible: active.eligible, credentialUnlocked: credentialReady, registrationStatus: registration, joinStatus: join?.status, joinIndex });
@@ -195,12 +195,12 @@ export function MaciPanel({ view = 'dashboard', electionId }: { view?: 'dashboar
     setBusy(true); setError(''); setNotice('');
     const toastId = showToast('loading', 'Đang xử lý yêu cầu…');
     try {
-      if (active?.chainId !== '31337') throw new Error('MACI_RPC_CHAIN_MISMATCH');
+      if (active?.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337')) throw new Error('MACI_RPC_CHAIN_MISMATCH');
       await work(); showToast('success', successMessage, toastId);
     } catch (cause) {
       if (cause instanceof Error && cause.message === 'MACI_RPC_CHAIN_MISMATCH') {
-        setError('Cuộc bỏ phiếu này không thuộc Hardhat Local 31337. Không thể thao tác trên chain khác.');
-        showToast('error', 'Sai mạng Hardhat Local 31337.', toastId);
+        setError('Cuộc bỏ phiếu này không thuộc mạng của bản web đang chạy.');
+        showToast('error', 'Sai mạng blockchain.', toastId);
         return;
       }
       setError('Không thể hoàn tất thao tác. Hãy kiểm tra trạng thái và thử lại.');
@@ -209,7 +209,7 @@ export function MaciPanel({ view = 'dashboard', electionId }: { view?: 'dashboar
   }
   async function register() {
     if (!active || !credentialContext || !eligibility || loadedCredentialId !== currentCredentialId) throw new Error('MACI_CREDENTIAL_NOT_READY');
-    if (active.chainId !== '31337') throw new Error('MACI_RPC_CHAIN_MISMATCH');
+    if (active.chainId !== (process.env.NEXT_PUBLIC_CHAIN_ID ?? '31337')) throw new Error('MACI_RPC_CHAIN_MISMATCH');
     // Recheck the server record before generating. An existing authorization
     // binds voting rights to its original public key even if local data is lost.
     const latest = await api<Eligibility>(`/maci/elections/${active.id}/eligibility`);
