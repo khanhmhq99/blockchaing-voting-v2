@@ -27,7 +27,7 @@ const businessInput = businessFields.superRefine((value, context) => {
   if (value.endTimestamp <= value.startTimestamp + 120) context.addIssue({ code: 'custom', message: 'End time must be more than two minutes after start.', path: ['endTimestamp'] });
 });
 const outputSchema = z.object({
-  chainId: z.literal(31337), runId: z.uuid(), deploymentBlock: z.number().int().nonnegative(),
+  chainId: z.union([z.literal(31337), z.literal(97)]), genesisHash: z.string().optional(), runId: z.uuid(), deploymentBlock: z.number().int().nonnegative(),
   maciAddress: z.string(), registrationAddress: z.string(), pollAddress: z.string(), pollId: z.string(),
   startTimestamp: z.number().int(), endTimestamp: z.number().int(), candidates: z.array(z.string()),
   transactions: z.array(z.object({ hash: z.string(), blockNumber: z.number().int(), gasUsed: z.string() })).min(1),
@@ -36,6 +36,16 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
   return JSON.stringify(value);
+}
+
+function runDeploymentCommand(script: string, args: string[], rpcUrl: string): Promise<number> {
+  return new Promise<number>((resolveCode, reject) => {
+    const child = spawn(process.execPath, [join(root, 'scripts', script), ...args], {
+      cwd: root, env: { ...process.env, MACI_RPC_URL: rpcUrl }, stdio: 'ignore', windowsHide: true,
+    });
+    child.once('error', reject);
+    child.once('exit', code => resolveCode(code ?? 1));
+  });
 }
 
 @Injectable()
@@ -50,9 +60,10 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (this.chain.config.CHAIN_ID === 97 && process.env.MACI_BSC_TESTNET_ENABLED !== 'true') return;
     this.timer = setInterval(() => { void this.pump().catch(() => { /* Jobs remain durable for a later retry. */ }); }, 5_000);
     this.timer.unref();
-    void this.db.maciDeploymentJob.updateMany({ where: { status: { in: ['DEPLOYING', 'VERIFYING'] } }, data: { status: 'RECONCILIATION_REQUIRED', stage: 'INTERRUPTED', diagnosticCode: 'MACI_WORKER_RESTARTED' } })
+    void this.db.maciDeploymentJob.updateMany({ where: { chainId: String(this.chain.config.CHAIN_ID), status: { in: ['DEPLOYING', 'VERIFYING'] } }, data: { status: 'RECONCILIATION_REQUIRED', stage: 'INTERRUPTED', diagnosticCode: 'MACI_WORKER_RESTARTED' } })
       .then(() => this.pump()).catch(() => { /* API startup must not erase deployment intent. */ });
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
@@ -64,13 +75,15 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
 
   async create(cookie: string | undefined, keyInput: string | undefined, body: unknown) {
     const admin = await this.auth.admin(cookie);
+    if (this.chain.config.CHAIN_ID === 97 && process.env.MACI_BSC_TESTNET_ENABLED !== 'true') throw new ForbiddenException({ code: 'MACI_TESTNET_DISABLED', message: 'BSC Testnet deployment is not enabled for this service.' });
     const key = z.uuid().parse(keyInput);
     const fields = businessFields.parse(body);
     const canonical = JSON.stringify(fields);
     const hash = createHash('sha256').update(canonical).digest('hex');
-    if (this.chain.config.CHAIN_ID !== 31337 || await this.chain.client.getChainId() !== 31337) throw new ForbiddenException({ code: 'MACI_LOCAL_ONLY', message: 'Automatic deployment requires Hardhat chain 31337.' });
+    if (await this.chain.client.getChainId() !== this.chain.config.CHAIN_ID) throw new ForbiddenException({ code: 'MACI_CHAIN_MISMATCH', message: 'Configured RPC chain does not match this service.' });
     const existing = await this.db.maciDeploymentJob.findUnique({ where: { requestedById_idempotencyKey: { requestedById: admin.id, idempotencyKey: key } } });
     if (existing) {
+      if (existing.chainId !== String(this.chain.config.CHAIN_ID)) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_NETWORK_MISMATCH', message: 'This request key belongs to another chain.' });
       if (existing.requestHash !== hash) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_MISMATCH', message: 'This key belongs to another election request.' });
       return this.view(existing);
     }
@@ -80,7 +93,7 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     const genesis = await this.chain.client.getBlock({ blockNumber: 0n });
     try {
       const row = await this.db.maciDeploymentJob.create({ data: {
-        id: randomUUID(), requestedById: admin.id, idempotencyKey: key, requestHash: hash,
+        id: randomUUID(), chainId: String(this.chain.config.CHAIN_ID), requestedById: admin.id, idempotencyKey: key, requestHash: hash,
         requestedConfig: input, genesisHash: genesis.hash,
       } });
       void this.pump().catch(() => {});
@@ -88,6 +101,7 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
         const existing = await this.db.maciDeploymentJob.findUniqueOrThrow({ where: { requestedById_idempotencyKey: { requestedById: admin.id, idempotencyKey: key } } });
+        if (existing.chainId !== String(this.chain.config.CHAIN_ID)) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_NETWORK_MISMATCH', message: 'This request key belongs to another chain.' });
         if (existing.requestHash !== hash) throw new ConflictException({ code: 'MACI_IDEMPOTENCY_MISMATCH', message: 'This key belongs to another election request.' });
         return this.view(existing);
       }
@@ -100,6 +114,7 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     const id = z.uuid().parse(jobIdInput);
     const row = await this.db.maciDeploymentJob.findUnique({ where: { id } });
     if (!row) throw new ConflictException({ code: 'MACI_JOB_MISSING', message: 'Deployment job was not found.' });
+    if (row.chainId !== String(this.chain.config.CHAIN_ID)) throw new ConflictException({ code: 'MACI_CHAIN_MISMATCH', message: 'Deployment job belongs to another chain.' });
     if (row.status === 'RECONCILIATION_REQUIRED') void this.reconcile(id).catch(() => {});
     if (row.status === 'DEPLOYING') await this.updateCheckpoint(id);
     return this.view(await this.db.maciDeploymentJob.findUniqueOrThrow({ where: { id } }));
@@ -107,7 +122,7 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
 
   async recent(cookie: string | undefined) {
     await this.auth.admin(cookie);
-    const rows = await this.db.maciDeploymentJob.findMany({ orderBy: { createdAt: 'desc' }, take: 20 });
+    const rows = await this.db.maciDeploymentJob.findMany({ where: { chainId: String(this.chain.config.CHAIN_ID) }, orderBy: { createdAt: 'desc' }, take: 20 });
     return rows.map(row => this.view(row));
   }
 
@@ -116,7 +131,7 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     if (!existsSync(file)) return;
     try {
       const { stage } = z.object({ stage: z.enum(['policies-deployed', 'maci-deployed', 'verifying-keys-set', 'complete']) }).parse(JSON.parse(readFileSync(file, 'utf8')));
-      await this.db.maciDeploymentJob.updateMany({ where: { id, status: 'DEPLOYING' }, data: { stage: stage.toUpperCase().replaceAll('-', '_') } });
+      await this.db.maciDeploymentJob.updateMany({ where: { id, chainId: String(this.chain.config.CHAIN_ID), status: 'DEPLOYING' }, data: { stage: stage.toUpperCase().replaceAll('-', '_') } });
     } catch { /* Untrusted or incomplete checkpoint is not a progress signal. */ }
   }
 
@@ -124,16 +139,17 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     if (this.checking) return;
     this.checking = true;
     try {
-      const waiting = await this.db.maciDeploymentJob.findMany({ where: { status: 'RECONCILIATION_REQUIRED' }, select: { id: true }, take: 10 });
+      const chainId = String(this.chain.config.CHAIN_ID);
+      const waiting = await this.db.maciDeploymentJob.findMany({ where: { chainId, status: 'RECONCILIATION_REQUIRED' }, select: { id: true }, take: 10 });
       for (const row of waiting) await this.reconcile(row.id).catch(() => {});
-      const unresolved = await this.db.maciDeploymentJob.count({ where: { status: 'RECONCILIATION_REQUIRED' } });
+      const unresolved = await this.db.maciDeploymentJob.count({ where: { chainId, status: 'RECONCILIATION_REQUIRED' } });
       if (unresolved) return;
-      const running = await this.db.maciDeploymentJob.findFirst({ where: { status: 'DEPLOYING' }, select: { id: true } });
+      const running = await this.db.maciDeploymentJob.findFirst({ where: { chainId, status: 'DEPLOYING' }, select: { id: true } });
       if (running) await this.updateCheckpoint(running.id);
       const claimed = await this.db.$transaction(async tx => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(31337::bigint)`;
-        if (await tx.maciDeploymentJob.findFirst({ where: { status: { in: ['DEPLOYING', 'VERIFYING'] } } })) return null;
-        const row = await tx.maciDeploymentJob.findFirst({ where: { status: 'CREATING' }, orderBy: { createdAt: 'asc' } });
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${BigInt(this.chain.config.CHAIN_ID)})`;
+        if (await tx.maciDeploymentJob.findFirst({ where: { chainId, status: { in: ['DEPLOYING', 'VERIFYING'] } } })) return null;
+        const row = await tx.maciDeploymentJob.findFirst({ where: { chainId, status: 'CREATING' }, orderBy: { createdAt: 'asc' } });
         if (!row) return null;
         await tx.maciDeploymentJob.update({ where: { id: row.id }, data: { status: 'DEPLOYING', stage: 'CLAIMED' } });
         return row.id;
@@ -143,11 +159,12 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async chainMatches(genesisHash: string) {
-    if (await this.chain.client.getChainId() !== 31337 || (await this.chain.client.getBlock({ blockNumber: 0n })).hash !== genesisHash) throw new ConflictException({ code: 'MACI_CHAIN_RESET', message: 'Local chain fingerprint changed.' });
+    if (await this.chain.client.getChainId() !== this.chain.config.CHAIN_ID || (await this.chain.client.getBlock({ blockNumber: 0n })).hash !== genesisHash) throw new ConflictException({ code: 'MACI_CHAIN_RESET', message: 'Configured chain fingerprint changed.' });
   }
 
   private async run(id: string) {
     const row = await this.db.maciDeploymentJob.findUniqueOrThrow({ where: { id } });
+    if (row.chainId !== String(this.chain.config.CHAIN_ID)) return;
     try {
       await this.chainMatches(row.genesisHash);
       if (existsSync(join(outputs, id))) {
@@ -159,24 +176,17 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
       mkdirSync(intents, { recursive: true });
       const input = businessFields.parse(row.requestedConfig);
       const configFile = join(intents, `${id}.json`);
-      writeFileSync(configFile, `${JSON.stringify({ runId: id, chainId: 31337, ...input })}\n`, { flag: 'wx' });
-      const runCommand = (script: string, args: string[]) => new Promise<number>((resolveCode, reject) => {
-        const child = spawn(process.execPath, [join(root, 'scripts', script), ...args], {
-          cwd: root, env: { ...process.env, MACI_RPC_URL: this.chain.config.RPC_URL }, stdio: 'ignore', windowsHide: true,
-        });
-        child.once('error', reject);
-        child.once('exit', code => resolveCode(code ?? 1));
-      });
-      const exitCode = await runCommand('deploy-maci-local.mjs', [configFile]);
+      writeFileSync(configFile, `${JSON.stringify({ runId: id, chainId: this.chain.config.CHAIN_ID, ...input })}\n`, { flag: 'wx' });
+      const exitCode = await runDeploymentCommand(this.chain.config.CHAIN_ID === 97 ? 'deploy-maci-testnet.mjs' : 'deploy-maci-local.mjs', [configFile], this.chain.config.RPC_URL);
       if (exitCode !== 0) {
         await this.db.maciDeploymentJob.update({ where: { id }, data: { status: 'RECONCILIATION_REQUIRED', stage: 'SCRIPT_EXITED', diagnosticCode: 'MACI_DEPLOYMENT_UNCERTAIN' } });
         return;
       }
       await this.db.maciDeploymentJob.update({ where: { id }, data: { stage: 'ANCHORING_CANDIDATES' } });
-      const anchorExit = await runCommand('anchor-mvp4-local.mjs', [
+      const anchorExit = await runDeploymentCommand('anchor-mvp4-local.mjs', [
         '--deployment', join(outputs, id, 'deployment.json'), '--candidate-ids', input.candidates.map((_, index) => `option-${index}`).join(','),
         '--election-id', id, '--out', join(outputs, id, 'election-config.json'),
-      ]);
+      ], this.chain.config.RPC_URL);
       if (anchorExit !== 0) {
         await this.db.maciDeploymentJob.update({ where: { id }, data: { status: 'RECONCILIATION_REQUIRED', stage: 'ANCHOR_UNCERTAIN', diagnosticCode: 'MACI_ANCHOR_RECONCILIATION_REQUIRED' } });
         return;
@@ -191,16 +201,41 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
 
   private async reconcile(id: string) {
     const row = await this.db.maciDeploymentJob.findUniqueOrThrow({ where: { id } });
+    if (row.chainId !== String(this.chain.config.CHAIN_ID)) return;
     if (row.status === 'READY' || row.status === 'FAILED') return;
     const file = join(outputs, id, 'deployment.json');
     const configFile = join(outputs, id, 'election-config.json');
-    if (!existsSync(file) || !existsSync(configFile)) return;
     try {
       await this.chainMatches(row.genesisHash);
+      if (!existsSync(file) || !existsSync(configFile)) {
+        if (this.chain.config.CHAIN_ID === 97 && process.env.MACI_BSC_TESTNET_ENABLED !== 'true') return;
+        const input = businessFields.parse(row.requestedConfig);
+        if (!existsSync(file)) {
+          const outputDirectory = join(outputs, id);
+          if (existsSync(outputDirectory) && !existsSync(join(outputDirectory, 'journal.json'))) throw new Error('deployment output without journal');
+          const runtime = join(root, 'research/mvp3/maci/runtime-env/node_modules/@maci-protocol/contracts/node_modules/hardhat');
+          if (!existsSync(runtime)) throw new Error('runtime missing');
+          mkdirSync(intents, { recursive: true });
+          const intentFile = join(intents, `${id}.json`);
+          const intended = { runId: id, chainId: this.chain.config.CHAIN_ID, ...input };
+          if (existsSync(intentFile)) {
+            if (canonical(JSON.parse(readFileSync(intentFile, 'utf8'))) !== canonical(intended)) throw new Error('deployment intent mismatch');
+          } else writeFileSync(intentFile, `${JSON.stringify(intended)}\n`, { flag: 'wx' });
+          const exitCode = await runDeploymentCommand(this.chain.config.CHAIN_ID === 97 ? 'deploy-maci-testnet.mjs' : 'deploy-maci-local.mjs', [intentFile], this.chain.config.RPC_URL);
+          if (exitCode !== 0 || !existsSync(file)) throw new Error('deployment resume pending');
+        }
+        if (!existsSync(configFile)) {
+          const exitCode = await runDeploymentCommand('anchor-mvp4-local.mjs', [
+            '--deployment', file, '--candidate-ids', input.candidates.map((_, index) => `option-${index}`).join(','),
+            '--election-id', id, '--out', configFile,
+          ], this.chain.config.RPC_URL);
+          if (exitCode !== 0 || !existsSync(configFile)) throw new Error('anchor resume pending');
+        }
+      }
       const output = outputSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
       const input = businessFields.parse(row.requestedConfig);
-      if (output.runId !== id || output.startTimestamp !== input.startTimestamp || output.endTimestamp !== input.endTimestamp || JSON.stringify(output.candidates) !== JSON.stringify(input.candidates)) throw new Error('configuration mismatch');
-      const deployment = { chainId: '31337', maciAddress: getAddress(output.maciAddress), registrationAddress: getAddress(output.registrationAddress), pollAddress: getAddress(output.pollAddress), pollId: output.pollId, deploymentBlock: String(output.deploymentBlock) };
+      if (output.chainId !== this.chain.config.CHAIN_ID || (output.chainId === 97 && output.genesisHash?.toLowerCase() !== row.genesisHash.toLowerCase()) || output.runId !== id || output.startTimestamp !== input.startTimestamp || output.endTimestamp !== input.endTimestamp || JSON.stringify(output.candidates) !== JSON.stringify(input.candidates)) throw new Error('configuration mismatch');
+      const deployment = { chainId: String(output.chainId), maciAddress: getAddress(output.maciAddress), registrationAddress: getAddress(output.registrationAddress), pollAddress: getAddress(output.pollAddress), pollId: output.pollId, deploymentBlock: String(output.deploymentBlock) };
       const head = await this.chain.client.getBlockNumber({ cacheTime: 0 });
       for (const tx of output.transactions) {
         const receipt = await this.chain.client.getTransactionReceipt({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/).parse(tx.hash) as Hex });
@@ -239,6 +274,8 @@ export class MaciDeploymentService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       const known = new Set(['configuration mismatch', 'receipt mismatch or unconfirmed', 'receipt block mismatch', 'poll mismatch', 'candidate anchor mismatch', 'deployment code hash mismatch', 'anchor receipt invalid', 'anchor late', 'anchor unconfirmed', 'anchor sender mismatch', 'anchor hash mismatch']);
       const reason = error instanceof Error && known.has(error.message) ? error.message.toUpperCase().replaceAll(/[^A-Z0-9]+/g, '_') : error instanceof ConflictException ? 'CHAIN_VALIDATION_CONFLICT' : 'CHAIN_RECONCILIATION_REQUIRED';
+      const detail = error instanceof Error ? error.message.replaceAll(/https?:\/\/\S+|0x[0-9a-fA-F]{64}/g, '[redacted]').slice(0, 180) : 'unknown';
+      process.stderr.write(`MACI reconciliation pending: ${reason}; ${detail}\n`);
       await this.db.maciDeploymentJob.update({ where: { id }, data: { status: 'RECONCILIATION_REQUIRED', stage: 'VALIDATION_PENDING', diagnosticCode: `MACI_${reason}` } });
     }
   }

@@ -53,6 +53,7 @@ export class MaciRelayService {
   }
 
   async submit(electionId: string, body: unknown, idempotencyKey: string | undefined, cookie: string | undefined) {
+    this.chain.requireTransactionsEnabled();
     if (cookie) throw new ForbiddenException({ code: 'MACI_IDENTITY_COOKIE_FORBIDDEN', message: 'Submit encrypted commands without an identity session.' });
     this.rate();
     const parsed = encryptedMessageSchema.parse(body);
@@ -104,6 +105,7 @@ export class MaciRelayService {
   private async reconcile(id: string) {
     const row = await this.db.maciEncryptedSubmission.findUnique({ where: { id } });
     if (!row) throw new ConflictException({ code: 'MACI_SUBMISSION_MISSING', message: 'Encrypted submission was not found.' });
+    if (row.chainId !== String(this.chain.config.CHAIN_ID)) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'Encrypted submission belongs to another chain.' });
     if (!row.transactionHash || !row.rawTransaction || !row.calldataHash || row.nonce === null) return row;
     await this.network();
     const account = sponsorAccount();

@@ -31,7 +31,7 @@ Runtime TLS uses `rejectUnauthorized: true` and strips URL SSL flags that could 
 
 Use a migration role owning the private schema and a separate runtime login. Provision role passwords through the provider's secure administration procedure, not a committed SQL file. The migration creates `voting`, tables and indexes; it does not modify `public` or remove existing tables. Review the SQL and confirm there is no existing conflicting `voting` schema before applying it. An existing database may need a reviewed baseline migration; do not use reset or `db push`.
 
-After applying the schema, grant the runtime role `CONNECT` to the database, `USAGE` on `voting`, and `SELECT, INSERT, UPDATE, DELETE` on its tables. Configure the migration owner's default privileges for future tables. Do not grant `CREATE`, ownership, superuser or bypass-RLS privileges to the runtime role. Keep `voting` out of Supabase's exposed Data API schemas; do not grant `anon`/`authenticated` access. Schema ACLs are the access boundary here; no Supabase Auth/JWT integration is present. Review actual grants in the configured project.
+Provision the runtime role with `CONNECT` before migration. Migration `202611020001_maci_runtime_schema_usage` grants `USAGE` on `voting`; the table migrations grant only their required operations and RLS policies. Configure the migration owner's default privileges for future tables. Do not grant `CREATE`, ownership, superuser or bypass-RLS privileges to the runtime role. Keep `voting` out of Supabase's exposed Data API schemas; do not grant `anon`/`authenticated` access. Schema ACLs are the access boundary here; no Supabase Auth/JWT integration is present. Review actual grants in the configured project.
 
 ```powershell
 npm.cmd run prisma:validate
@@ -41,7 +41,7 @@ npm.cmd run db:migrate:deploy
 npm.cmd run db:check
 ```
 
-`db:check` opens the real Prisma adapter connection, executes `SELECT 1` and reads the metadata table. Missing credentials produce `BLOCKED` and a nonzero exit, not a simulated pass. `db:migrate:status` is read-only. No managed migration was applied during implementation. Offline validation/generation uses a nonconnecting dummy datasource; this is not a local PostgreSQL service.
+`db:check` opens the real Prisma adapter connection, executes `SELECT 1` and reads the metadata table. Missing credentials produce `BLOCKED` and a nonzero exit, not a simulated pass. `db:migrate:status` is read-only. As of 2026-11-02, all nine reviewed migrations are applied to both the separate BSC Testnet and Hardhat Local Supabase projects; see the [MACI progress checkpoint](../mvp3/maci/PROGRESS.md) for the backup, status checks and limitations. Offline validation/generation uses a nonconnecting dummy datasource; this is not a local PostgreSQL service.
 
 For future schema changes generate a reviewed migration using `prisma migrate diff` against a known prior schema or a dedicated disposable development database. Commit SQL and the updated schema together. Never regenerate an initial migration after it has been applied. The wrapper blocks `reset`, `dev` and `push` to prevent accidental destructive shared-database workflows.
 

@@ -13,5 +13,10 @@ module.exports = {
       chainId: 31337,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
+    ...(process.env.CHAIN_ID === '97' && process.env.MACI_RPC_URL ? { bscTestnet: {
+      url: process.env.MACI_RPC_URL,
+      chainId: 97,
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+    } } : {}),
   },
 };

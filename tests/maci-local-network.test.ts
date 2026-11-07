@@ -4,12 +4,16 @@ import { chainConfig } from '../services/api/src/config.ts';
 import { ChainService } from '../services/api/src/chain.ts';
 import { MaciService } from '../services/api/src/maci/module.ts';
 
-test('API configuration rejects chain 97 and a non-loopback RPC', () => {
+test('API configuration separates Hardhat Local and BSC Testnet RPC policies', () => {
   const local = { RPC_URL: 'http://127.0.0.1:8545', CHAIN_ID: '31337' };
   assert.equal(chainConfig(local).CHAIN_ID, 31337);
-  assert.throws(() => chainConfig({ ...local, CHAIN_ID: '97' }), /Hardhat Local/);
+  assert.throws(() => chainConfig({ ...local, CHAIN_ID: '97' }), /BSC Testnet/);
   assert.throws(() => chainConfig({ ...local, RPC_URL: 'https://example.invalid' }), /Hardhat Local/);
-  assert.throws(() => chainConfig({ ...local, MACI_RPC_URL: 'http://127.0.0.1:8546' }), /same Hardhat Local RPC/);
+  assert.throws(() => chainConfig({ ...local, MACI_RPC_URL: 'http://127.0.0.1:8546' }), /must match/);
+  const testnet = { RPC_URL: 'https://rpc.example.invalid/testnet', CHAIN_ID: '97', NEXT_PUBLIC_MACI_RPC_URL: 'https://public.example.invalid/rpc' };
+  assert.equal(chainConfig(testnet).CHAIN_ID, 97);
+  assert.throws(() => chainConfig({ ...testnet, RPC_URL: 'http://rpc.example.invalid' }), /BSC Testnet/);
+  assert.throws(() => chainConfig({ ...testnet, CHAIN_ID: '56' }));
 });
 
 test('a chain 97 election is rejected before contract reads', async () => {
@@ -36,7 +40,23 @@ test('relay preflight rejects disconnected RPC and missing bytecode', async () =
   Object.assign(service, { client: { getChainId: async () => { throw new Error('offline'); } } });
   await assert.rejects(service.requireLocalContract(address), error => typeof error === 'object' && error !== null && 'response' in error &&
     (error.response as { code?: string }).code === 'DEPENDENCY_UNAVAILABLE');
-  Object.assign(service, { client: { getChainId: async () => 31337, getCode: async () => undefined } });
+  Object.assign(service, { config: { CHAIN_ID: 31337 }, client: { getChainId: async () => 31337, getCode: async () => undefined } });
   await assert.rejects(service.requireLocalContract(address), error => typeof error === 'object' && error !== null && 'response' in error &&
     (error.response as { code?: string }).code === 'MACI_CONTRACT_MISSING');
+});
+
+test('BSC Testnet transactions remain disabled until explicitly enabled', () => {
+  const service = Object.create(ChainService.prototype) as ChainService;
+  Object.assign(service, { config: { CHAIN_ID: 97 } });
+  const previous = process.env.MACI_BSC_TESTNET_ENABLED;
+  delete process.env.MACI_BSC_TESTNET_ENABLED;
+  try {
+    assert.throws(() => service.requireTransactionsEnabled(), error => typeof error === 'object' && error !== null && 'response' in error &&
+      (error.response as { code?: string }).code === 'MACI_TESTNET_DISABLED');
+    process.env.MACI_BSC_TESTNET_ENABLED = 'true';
+    assert.doesNotThrow(() => service.requireTransactionsEnabled());
+  } finally {
+    if (previous === undefined) delete process.env.MACI_BSC_TESTNET_ENABLED;
+    else process.env.MACI_BSC_TESTNET_ENABLED = previous;
+  }
 });

@@ -11,8 +11,8 @@ function fixture(status = 'READY') {
   const job = { id: electionId, electionId, status, stage: 'AUDIT_VERIFIED', diagnosticCode: null,
     closingBlock: 5n, closingHash: blockHash, genesisHash: blockHash, snapshotBlock: 8n, snapshotHash: blockHash,
     manifestJson: '{}', eventsNdjson: '{}\n', proofsJson: '[]', tallyJson: '{}', createdAt: new Date(), updatedAt: new Date() };
-  const db = { maciProofJob: { findUnique: async () => job, updateMany: async () => { calls.updated++; return { count: 1 }; } } };
-  const chain = { config: { CHAIN_CONFIRMATIONS: 2 }, verifyNetwork: async () => {}, client: {
+  const db = { maciProofJob: { findUnique: async () => job, findFirst: async () => job, updateMany: async () => { calls.updated++; return { count: 1 }; } } };
+  const chain = { config: { CHAIN_ID: 31337, CHAIN_CONFIRMATIONS: 2 }, verifyNetwork: async () => {}, client: {
     getBlock: async () => ({ hash: blockHash }), getBlockNumber: async () => 10n,
   } };
   const auth = { admin: async (cookie?: string) => { if (cookie !== 'admin') throw new Error('UNAUTHORIZED'); } };
@@ -28,7 +28,7 @@ test('only an authenticated admin can publish a ready job', async () => {
 
 test('admin status returns a stable envelope when no proof job exists', async () => {
   const { service, db } = fixture();
-  db.maciProofJob.findUnique = async () => null as never;
+  db.maciProofJob.findFirst = async () => null as never;
   assert.deepEqual(await service.status('admin', electionId), { job: null });
 });
 

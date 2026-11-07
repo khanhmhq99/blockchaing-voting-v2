@@ -1,5 +1,21 @@
 # MACI artifact provenance
 
+## 2026-11-02 selected-artifact recheck
+
+All 16 selected ZKey, VKey, reconstructed R1CS and WASM SHA-256 hashes were
+recomputed and matched the inventories below. The stored synthetic processing
+and tally proofs were freshly accepted by `snarkjs.groth16.verify` and by the
+packaged Solidity `Verifier` on an ephemeral Hardhat chain 31337; incrementing
+public input 0 caused both verifiers to reject each proof. The Solidity probe
+is `research/mvp3/maci/verify-stored-proofs-local.cjs` (exit 0). Earlier local
+election evidence includes the same VKeys registered in the local contract.
+These observations establish technical compatibility, not independent setup
+trust or BSC execution. The exact archive still has no public hash-bound
+phase-two transcript, manifest or participant attestations. Each of the four
+selected ZKeys is **PARTIALLY VERIFIED** for integrity/compatibility and
+**UNVERIFIED** for independent ceremony trust. See the
+[BSC readiness decision](BSC_DEPLOYMENT_READINESS_2026-11-02.md).
+
 ## Browser poll-join artifact publication, 2026-10-15
 
 The Desktop Web build now serves only the selected poll-joining artifacts from `apps/voter-web/public/maci/v3.0.0/`. The copied `polljoining_14.zkey` is 2,930,749 bytes, SHA-256 `e34c5b3d69c05cad40b0191f0cd799f58296da2348551250f6f7f7290862a9bf`; `PollJoining_14.wasm` is 1,107,459 bytes, SHA-256 `91029078c4c2455078bfcc73d7db61ecf959dd639fb50e283f384a4c68cc64ce`. These match the ignored official archive extraction and reconstructed source build respectively. Publishing bytes for local proof generation does not independently approve the ceremony or protect a compromised browser. Processor/tally proving keys remain outside the public web bundle and are used by the explicit coordinator process.

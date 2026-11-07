@@ -16,16 +16,19 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = process.argv[2];
 if (!configPath) throw new Error('Usage: node scripts/maci-coordinator.mjs <public-election-config.json>');
 const config = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
-if (!config || !/^[a-z0-9_-]{1,64}$/.test(config.runId) || config.chainId !== 31337 || !/^0x[0-9a-fA-F]{40}$/.test(config.maciAddress) || !/^(0|[1-9][0-9]*)$/.test(config.pollId) || !Number.isSafeInteger(config.deploymentBlock) || config.deploymentBlock < 0 || !Number.isInteger(config.voteOptions) || config.voteOptions < 2 || config.voteOptions > 125) throw new Error('MACI coordinator requires a Hardhat Local 31337 election');
+if (!config || !/^[a-z0-9_-]{1,64}$/.test(config.runId) || ![31337, 97].includes(config.chainId) || (config.chainId === 97 && process.env.CHAIN_ID !== '97') || !/^0x[0-9a-fA-F]{40}$/.test(config.maciAddress) || !/^(0|[1-9][0-9]*)$/.test(config.pollId) || !Number.isSafeInteger(config.deploymentBlock) || config.deploymentBlock < 0 || !Number.isInteger(config.voteOptions) || config.voteOptions < 2 || config.voteOptions > 125) throw new Error('Invalid MACI coordinator election or chain');
 const coordinatorSecret = process.env.MACI_COORDINATOR_PRIVATE_KEY;
 const proverKey = process.env.MACI_PROVER_PRIVATE_KEY;
 const rpcUrl = process.env.MACI_RPC_URL || process.env.RPC_URL;
 const rpc = rpcUrl && new URL(rpcUrl);
-if (!rpc || rpc.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(rpc.hostname) || rpc.username || rpc.password || rpc.pathname !== '/' || rpc.search || rpc.hash) throw new Error('MACI coordinator requires a loopback Hardhat RPC');
+const localRpc = rpc && rpc.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(rpc.hostname) && rpc.pathname === '/' && !rpc.search;
+const testnetRpc = rpc && rpc.protocol === 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(rpc.hostname);
+if (!rpc || rpc.username || rpc.password || rpc.hash || (config.chainId === 31337 ? !localRpc : !testnetRpc)) throw new Error('MACI coordinator RPC does not match the selected chain');
 if (!coordinatorSecret || !/^macisk\.[0-9a-fA-F]{64}$/.test(coordinatorSecret) || !proverKey || !/^0x[0-9a-fA-F]{64}$/.test(proverKey) || !rpcUrl) throw new Error('MACI coordinator secrets or RPC are not configured');
 if ([process.env.MACI_ISSUER_PRIVATE_KEY, process.env.MACI_RELAYER_PRIVATE_KEY, process.env.MACI_REGISTRATION_RELAYER_PRIVATE_KEY, process.env.MACI_JOIN_RELAYER_PRIVATE_KEY].some(value => value?.toLowerCase() === proverKey.toLowerCase())) throw new Error('MACI prover EVM key must be separate from issuer and relayers');
 const output = path.join(repo, 'research/mvp3/maci/probe-output/coordinator', config.runId);
-const resume = fs.existsSync(output) && JSON.parse(fs.readFileSync(path.join(output, 'checkpoint.json'), 'utf8')).stage === 'proofs-generated';
+const previousCheckpoint = fs.existsSync(output) ? JSON.parse(fs.readFileSync(path.join(output, 'checkpoint.json'), 'utf8')) : null;
+const resume = previousCheckpoint?.stage === 'proofs-generated';
 if (fs.existsSync(output) && !resume) throw new Error('Coordinator run ID already exists; use a fresh ID to preserve evidence');
 fs.mkdirSync(path.join(output, 'private'), { recursive: true });
 fs.mkdirSync(path.join(output, 'public'), { recursive: true });
@@ -58,15 +61,16 @@ async function events(provider, address, topic, fromBlock, toBlock) {
 }
 
 async function main() {
-  const provider = new JsonRpcProvider(rpcUrl, config.chainId);
+  const provider = new JsonRpcProvider(rpcUrl, config.chainId, { batchMaxCount: 1 });
   if (Number((await provider.getNetwork()).chainId) !== config.chainId) throw new Error('RPC chain mismatch');
-  if (await provider.getCode(config.maciAddress) === '0x') throw new Error('MACI contract missing on Hardhat Local');
+  if (config.chainId === 97 && (!/^0x[0-9a-fA-F]{64}$/.test(config.genesisHash ?? '') || (await provider.getBlock(0)).hash.toLowerCase() !== config.genesisHash.toLowerCase())) throw new Error('MACI coordinator chain fingerprint mismatch');
+  if (await provider.getCode(config.maciAddress) === '0x') throw new Error('MACI contract missing on configured chain');
   const signer = new NonceManager(new Wallet(proverKey, provider));
   const maci = contracts.MACI__factory.connect(config.maciAddress, signer);
   const pollAddresses = await maci.getPoll(BigInt(config.pollId));
   if (pollAddresses.poll === '0x0000000000000000000000000000000000000000') throw new Error('MACI poll does not exist');
   for (const address of [pollAddresses.poll, pollAddresses.messageProcessor, pollAddresses.tally]) {
-    if (await provider.getCode(address) === '0x') throw new Error('MACI poll deployment is missing on Hardhat Local');
+    if (await provider.getCode(address) === '0x') throw new Error('MACI poll deployment is missing on configured chain');
   }
   const poll = contracts.Poll__factory.connect(pollAddresses.poll, signer);
   const coordinator = new Keypair(PrivateKey.deserialize(coordinatorSecret));
@@ -103,7 +107,10 @@ async function main() {
     mode: sdk.EMode.FULL, maciAddress: config.maciAddress, signer,
     startBlock: config.deploymentBlock, blocksPerBatch: 500,
   });
-  checkpoint('proofs-generated', { processProofs: generated.processProofs.length, tallyProofs: generated.tallyProofs.length, resumed: resume });
+  const proofScanStartBlock = resume ? previousCheckpoint.proofScanStartBlock : await provider.getBlockNumber();
+  if (!Number.isSafeInteger(proofScanStartBlock) || proofScanStartBlock < config.deploymentBlock) throw new Error('Invalid proof transaction scan checkpoint');
+  checkpoint('proofs-generated', { processProofs: generated.processProofs.length, tallyProofs: generated.tallyProofs.length,
+    proofScanStartBlock, resumed: resume });
   if (resume) {
     // The processing transaction is already final. The upstream proveOnChain
     // helper repeats a processed batch on restart, so submit the saved tally
@@ -120,7 +127,7 @@ async function main() {
   } else await sdk.proveOnChain({ pollId: BigInt(config.pollId), proofDir, tallyFile, maciAddress: config.maciAddress, signer });
   const afterProve = await provider.getBlockNumber();
   const proofTransactions = [];
-  for (let number = config.deploymentBlock; number <= afterProve; number += 1) {
+  for (let number = proofScanStartBlock; number <= afterProve; number += 1) {
     const block = await provider.getBlock(number);
     for (const hash of block.transactions) {
       const tx = await provider.getTransaction(hash);

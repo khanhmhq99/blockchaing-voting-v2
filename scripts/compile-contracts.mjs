@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import solc from 'solc';
 
-const settings = { optimizer: { enabled: true, runs: 200 }, evmVersion: 'cancun', outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } } };
+const settings = { optimizer: { enabled: true, runs: 200 }, evmVersion: 'cancun', outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } } };
 mkdirSync('packages/contracts/generated', { recursive: true });
 mkdirSync('packages/contracts/src', { recursive: true });
 for (const name of ['SponsoredMaciRegistration', 'OpenMaciPollJoinPolicy']) {
@@ -11,7 +11,7 @@ for (const name of ['SponsoredMaciRegistration', 'OpenMaciPollJoinPolicy']) {
   for (const error of output.errors ?? []) console.error(error.formattedMessage);
   if (output.errors?.some(error => error.severity === 'error')) process.exit(1);
   const contract = output.contracts[file][name];
-  writeFileSync(`packages/contracts/generated/${name}.json`, JSON.stringify({ abi: contract.abi, bytecode: `0x${contract.evm.bytecode.object}`, compiler: solc.version(), settings }, null, 2) + '\n');
+  writeFileSync(`packages/contracts/generated/${name}.json`, JSON.stringify({ abi: contract.abi, bytecode: `0x${contract.evm.bytecode.object}`, deployedBytecode: `0x${contract.evm.deployedBytecode.object}`, compiler: solc.version(), settings }, null, 2) + '\n');
   const exportName = name === 'SponsoredMaciRegistration' ? 'sponsoredMaciRegistrationAbi' : 'openMaciPollJoinPolicyAbi';
   const outputName = name === 'SponsoredMaciRegistration' ? 'sponsored-maci-registration-abi.ts' : 'open-maci-poll-join-policy-abi.ts';
   writeFileSync(`packages/contracts/src/${outputName}`, `// Generated from ${file} by npm run build:contracts.\nexport const ${exportName} = ${JSON.stringify(contract.abi, null, 2)} as const;\n`);

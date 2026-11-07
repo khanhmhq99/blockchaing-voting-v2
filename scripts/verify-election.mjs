@@ -105,24 +105,15 @@ async function proofChecks(provider, manifest, proofs, maci, addresses, tallyDat
     const subset = ordered.filter(row => row.name.startsWith(`${kind}_`));
     requireThat(subset.length > 0 && subset.every((row, i) => row.name === `${kind}_${i}.json`), 'PROOF_BATCH_GAP');
   }
-  requireThat(refs.filter(x => x.kind === 'process').length === Number(await processor.totalBatchesProcessed()) && refs.filter(x => x.kind === 'tally').length === Number(await tally.tallyBatchNum()), 'PROOF_BATCH_INCOMPLETE', 'INCOMPLETE');
+  requireThat(refs.filter(x => x.kind === 'process').length === Number(await processor.totalBatchesProcessed({ blockTag: manifest.snapshotBlock })) &&
+    refs.filter(x => x.kind === 'tally').length === Number(await tally.tallyBatchNum({ blockTag: manifest.snapshotBlock })), 'PROOF_BATCH_INCOMPLETE', 'INCOMPLETE');
   const signer = new VoidSigner('0x0000000000000000000000000000000000000001', provider);
   const keys = await sdk.getAllOnChainVerifyingKeys({ verifyingKeysRegistryAddress: await maci.verifyingKeysRegistry(), signer, stateTreeDepth: 14, tallyProcessingStateTreeDepth: 5, voteOptionTreeDepth: 3, messageBatchSize: 25, mode: sdk.EMode.FULL });
   const verifier = contracts.Verifier__factory.connect(await maci.verifier(), runner);
-  const allProofTxs = [];
-  for (let blockNum = manifest.deploymentBlock; blockNum <= manifest.snapshotBlock; blockNum++) {
-    const block = await provider.getBlock(blockNum);
-    requireThat(!!block, 'CHAIN_HISTORY_MISSING', 'INCOMPLETE');
-    for (const txHash of block.transactions) {
-      const tx = await provider.getTransaction(txHash);
-      if (tx?.to && [addresses.messageProcessor, addresses.tally].some(x => same(x, tx.to))) {
-        const kind = same(tx.to, addresses.messageProcessor) ? 'process' : 'tally';
-        const decoded = (kind === 'process' ? processor.interface : tally.interface).parseTransaction({ data: tx.data, value: tx.value });
-        if (decoded?.name === (kind === 'process' ? 'processMessages' : 'tallyVotes')) allProofTxs.push(txHash.toLowerCase());
-      }
-    }
-  }
-  requireThat(JSON.stringify(allProofTxs) === JSON.stringify(manifest.proofTransactions.map(x => x.hash.toLowerCase())), 'PROOF_TX_SET_MISMATCH');
+  // Both contract counters equal the complete manifest proof count at the
+  // pinned snapshot. Each counted transaction is checked below for exact
+  // target, calldata, receipt and Groth16 validity. Scanning every unrelated
+  // BSC block transaction adds no proof completeness and can exceed RPC limits.
   for (let i = 0; i < ordered.length; i++) {
     const row = ordered[i]; const ref = refs[i];
     requireThat(row && ref && row.name === `${ref.kind}_${i - refs.findIndex(x => x.kind === ref.kind)}.json` && hash(ref.hash), 'PROOF_ORDER_INVALID');
@@ -148,7 +139,7 @@ async function verify(args, checks, report) {
   const dir = path.resolve(args.evidence);
   const raw = Object.fromEntries(['manifest.json', 'events.ndjson', 'proofs.json', 'tally.json'].map(name => [name, readFile(dir, name)]));
   const manifest = parse(raw['manifest.json'], 'MANIFEST_JSON_INVALID');
-  requireThat(manifest.chainId === 31337, 'CHAIN_ID_MISMATCH');
+  requireThat([31337, 97].includes(manifest.chainId), 'CHAIN_ID_MISMATCH');
   report.electionId = null;
   report.pollId = manifest.pollId ?? null; report.chainId = manifest.chainId ?? null;
   report.snapshot = { number: manifest.snapshotBlock ?? null, hash: manifest.snapshotBlockHash ?? null };
@@ -169,9 +160,12 @@ async function verify(args, checks, report) {
   report.configurationHash = checkConfiguration(config, manifest, args['config-sha256']);
   checks.push({ code: 'CANDIDATE_CONFIGURATION', status: 'PASS', trust: 'caller supplied hash; on-chain pre-election anchor still required' });
   const rpc = new URL(args.rpc);
-  requireThat(rpc.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(rpc.hostname) && !rpc.username && !rpc.password && rpc.pathname === '/' && !rpc.search && !rpc.hash, 'LOCAL_RPC_REQUIRED');
-  const provider = new JsonRpcProvider(args.rpc);
+  const local = rpc.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(rpc.hostname) && rpc.pathname === '/' && !rpc.search;
+  const testnet = rpc.protocol === 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(rpc.hostname);
+  requireThat(!rpc.username && !rpc.password && !rpc.hash && (manifest.chainId === 31337 ? local : testnet), 'RPC_NETWORK_INVALID');
+  const provider = new JsonRpcProvider(args.rpc, undefined, { batchMaxCount: 1 });
   requireThat(Number((await provider.getNetwork()).chainId) === manifest.chainId, 'CHAIN_ID_MISMATCH');
+  if (manifest.chainId === 97) requireThat(hash(config.genesisHash) && same((await provider.getBlock(0)).hash, config.genesisHash), 'GENESIS_HASH_MISMATCH');
   const head = await provider.getBlockNumber();
   const depth = Number(args.confirmations ?? 1);
   requireThat(Number.isSafeInteger(depth) && depth >= 1 && depth <= 100_000, 'CONFIRMATION_ARGUMENT_INVALID', 'ERROR');

@@ -1,5 +1,93 @@
 # MACI MVP 3 progress and recovery point
 
+## 2026-11-02 four-blocker follow-up and deployment gate
+
+See [BSC deployment readiness](BSC_DEPLOYMENT_READINESS_2026-11-02.md) for
+the full four-blocker matrix, 59-finding audit snapshot, artifact/license
+classification, 17-contract gas/bytecode preflight and explicit **NO-GO**
+decision. The latest changes patch `@nestjs/platform-express` to 12.3.2,
+root/web `zod` to 4.6.7 and `follow-redirects` to 1.16.2; the repository's
+tracked Vitest config now has an exact declared dev dependency. Production
+audit exited 1 with 59 findings (0 critical, 22 high, 24 moderate, 13 low),
+down from 65/27 high. Typecheck, lint, API and BSC web builds, custom Solidity
+compilation, 23 focused tests, fresh off-chain proof checks and the new local
+Solidity valid/altered process+tally probe all exited 0. The chain-97
+preflight issued only read-only RPC calls and exited 0. No BSC transaction,
+managed database write or `.env` publication occurred in this follow-up.
+`MACI_BSC_TESTNET_ENABLED` remains `false`.
+
+## 2026-11-02 BSC Testnet database and deployment preflight
+
+Git base `fb81c05` plus preserved uncommitted work; Windows, repository-local
+Node 24.21.0/npm 11.19.0. The ignored `.env.bsc-testnet` and `.env.bsc-worker`
+select chain 97, the same BSC Supabase project for API/worker/migrations, and a
+different project from Hardhat Local. No credential or private key was printed.
+The configured RPC returned `eth_chainId=0x61`; the latest sampled block gas
+limit was 99,804,214 and gas price was 0.1 gwei. The five deployment/API EVM
+keys and the separate prover key were well formed, distinct, and funded with
+test BNB (sampled balances: deployer 0.1996378663, issuer 0.499979,
+registration sponsor 0.499979, join sponsor 0.499979, message sponsor 0.5,
+prover 0.5). Balances and network conditions can change.
+
+Before migration, the dedicated BSC database had no `voting` schema, Prisma
+history, or voting tables. The expected limited `voting_runtime` role existed.
+The Node runtime initially rejected the Supabase pooler TLS chain with
+`SELF_SIGNED_CERT_IN_CHAIN`; no TLS verification was disabled. The public
+Supabase Root 2021 CA was downloaded into ignored `.tools/`, SHA-256
+`700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7`,
+and the ignored BSC API/worker env files now set `DATABASE_CA_PATH`. The
+migration URL also supplies `sslrootcert` with `sslmode=verify-full`. Both
+runtime and migration roles then connected with verified TLS.
+
+The owner explicitly authorized applying reviewed migrations to this separate
+project. `scripts/prisma.mjs migrate deploy` exited 0 for the eight existing
+migrations. A subsequent runtime check exposed missing `USAGE` on the new
+`voting` schema (SQLSTATE `42501`). Additive migration
+`202611020001_maci_runtime_schema_usage` grants only that permission; its
+deployment exited 0. Final Prisma status and `scripts/check-database.ts`
+exited 0. Readback: 9 applied migrations, 0 failed, 15 voting tables with RLS
+enabled on all 15, runtime `USAGE=true`, `CREATE=false`, election `SELECT=true`,
+0 BSC election rows, 0 deployment jobs and 0 proof jobs. No existing voting
+row was reset or deleted.
+
+Read-only BSC `eth_estimateGas` returned 1,083,446 for
+`SponsoredMaciRegistration` with its issuer constructor and 334,309 for
+`OpenMaciPollJoinPolicy`. These are partial estimates, not a complete MACI
+deployment gas budget. Local upstream runtime bytecode sizes were 7,068 bytes
+for MACI, 15,576 for Poll, 7,189 for MessageProcessor and 9,049 for Tally.
+Repository-local `build:contracts`, `typecheck`, `lint`, `build:api` and the
+chain-97 static web build exited 0. The web build used patched Next.js 16.4.1;
+171 exported files were scanned and contained none of the configured private
+keys or database URLs. Twenty-three focused Local/BSC/deployment/proof/workflow
+tests passed. API `/v1/health` and `/v1/config` responded on chain 97, and the
+separate proof worker stayed alive through an idle smoke test; both processes
+were stopped afterward. `npm audit --omit=dev` still exited 1 with 65 findings
+(0 critical, 27 high, 25 moderate, 13 low), including high findings through
+the pinned MACI packages with no declared automatic fix.
+
+No MACI transaction was sent to BSC Testnet. `MACI_BSC_TESTNET_ENABLED` remains
+`false`. There is no chain-97 deployment record or Supabase election to
+reconcile, and no real BSC voting/proof/tally/audit E2E result. Deployment
+remains gated by the plan's MACI artifact provenance and license review,
+dependency advisory triage, and full upstream contract gas/bytecode and proof
+compatibility checks. The official v3 small-ceremony documentation claims
+production readiness, but the acquired archive still lacks an independently
+matched phase-two transcript/manifest; the four local ZKey/R1CS checks do not
+establish that provenance. Preserve the current keys, database rows and
+deployment output; do not enable testnet writes solely from this preflight.
+
+Hardhat Local's separate Supabase project initially had seven applied migrations
+and the two additive migrations above pending. Before applying them, a custom
+format backup of its `voting` schema was created in ignored
+`.tools/supabase-backup/20261102-before-network-isolation-local/local-voting.dump`;
+`pg_restore --list` exited 0 and listed 15 table-data entries. The backup is
+141,759 bytes, SHA-256
+`EC3993E62C20BD5FFF10E58F99977973083D8ECE116659FD7D742C73FD4D2ED1`.
+`prisma migrate deploy` then applied both pending migrations and exited 0.
+Final local `migrate status` and runtime `scripts/check-database.ts` exited 0.
+Readback found 9 applied migrations, 17 elections, 11 deployment jobs (all
+chain 31337), and 0 checkpoints. No local voting row was deleted or reset.
+
 ## 2026-10-26 empty proof-job response repair
 
 When no proof job existed, `MaciProofJobs.status()` returned `null`; the local
@@ -298,3 +386,43 @@ Historical checkpoint dated 2026-10-14, Asia/Saigon. Base Git revision `4566b4f0
 ## Inventory and deployment state
 
 Modified/new MACI files: this directory, ADR 0010, historical-document supersession banners and `research/mvp3/maci/{inventory-artifacts.mjs,inventory-archive.py,.gitignore}`. Root package/lockfile, contracts, ABI, deployed addresses, API, UI, schema and `.env` remain untouched by this checkpoint. Source commit and local artifact hashes are known; production circuit and setup provenance remain unresolved. Blockchain network and deployment status: none for MACI; chain 97 remains only the conditional target. Database migration status: none. Known limits: archived upstream repo, unverified transitive licenses/Node compatibility, no MACI proof, missing R1CS/WASM/ceremony transcript and unresolved walletless gatekeeper/recovery design. Do not infer proof or setup trust from the historical DAVINCI probes.
+
+## 2026-11-03 BSC recovery checkpoint
+
+The latest chain-97 decision remains **NO-GO for broadcasting**. The
+dedicated Supabase migration and earlier artifact/proof evidence remain in
+place, but there is no MACI BSC deployment or BSC election result. The
+current read-only preflight, local crash-recovery evidence, browser source
+strategy, test results, limitations and remaining authorization gate are
+recorded in [BSC deployment readiness](BSC_DEPLOYMENT_READINESS_2026-11-02.md#2026-11-03-continuation-recovery-and-browser-source).
+No `.env` file or private key was added to Git.
+
+## 2026-11-03 BSC chain-97 live continuation
+
+The owner approved the limited synthetic BSC research deployment after
+accepting the trusted-setup provenance limitation. The first poll completed
+deployment but missed registration before start. A second Admin-created poll
+`c3a7fd99-233e-4c06-a4c1-e3ae3c2dd576` has 18/18 confirmed journaled
+deployment transactions, a confirmed candidate anchor, Admin job
+`READY/COMPLETE`, and two confirmed synthetic voter signups. The dedicated
+BSC project has two chain-97 elections/jobs and zero local-chain rows.
+Join, encrypted voting, processing/tally and independent audit are pending.
+The authoritative hashes, addresses, limitations and check results are in
+[BSC deployment readiness](BSC_DEPLOYMENT_READINESS_2026-11-02.md#2026-11-03-authorized-chain-97-deployment-and-e2e-continuation).
+
+## 2026-11-04 BSC synthetic election E2E verified
+
+The second chain-97 election `c3a7fd99-233e-4c06-a4c1-e3ae3c2dd576`
+completed two sponsored registrations, two MACI joins, two encrypted
+commands, one genuine processing proof, one genuine tally proof, on-chain
+result publication, API audit publication and canonical candidate
+configuration publication. The final tally was `[1,1,0]`. The independent
+public-evidence CLI returned `PASS` (exit 0) against BSC RPC and the
+pre-election configuration pin. The Admin monitor reported `VERIFIED`,
+chain `AVAILABLE` and proof job `PUBLISHED`; a local Chromium session
+displayed the public audit and candidate mapping. The 30 chain-97
+transactions for this election used 36,139,592 gas and 0.0036139592 tBNB
+at 0.1 gwei. Detailed hashes, the publication-schema fix, the initial
+verifier timeout and residual research limits are in
+[the verified E2E checkpoint](BSC_DEPLOYMENT_READINESS_2026-11-02.md#verified-synthetic-e2e-result).
+This is a synthetic academic PoC, not a real-electorate or mainnet claim.

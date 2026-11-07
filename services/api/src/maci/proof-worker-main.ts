@@ -9,6 +9,9 @@ import { MaciProofJobs } from './proof-jobs.js';
 if (!/^macisk\.[0-9a-fA-F]{64}$/.test(process.env.MACI_COORDINATOR_PRIVATE_KEY ?? '') || !/^0x[0-9a-fA-F]{64}$/.test(process.env.MACI_PROVER_PRIVATE_KEY ?? '')) {
   throw new Error('Proof worker requires separately configured coordinator and prover keys.');
 }
+if (process.env.MACI_PROOF_ELECTION_ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(process.env.MACI_PROOF_ELECTION_ID)) {
+  throw new Error('MACI_PROOF_ELECTION_ID must be a UUID.');
+}
 const db = new DatabaseService();
 const chain = new ChainService();
 const auth = new AuthService(db);

@@ -39,14 +39,14 @@ export class MaciProofJobs {
   async status(cookie: string | undefined, electionIdInput: string) {
     await this.auth.admin(cookie);
     const electionId = z.uuid().parse(electionIdInput);
-    const job = await this.db.maciProofJob.findUnique({ where: { electionId } });
+    const job = await this.db.maciProofJob.findFirst({ where: { electionId, election: { chainId: String(this.chain.config.CHAIN_ID) } } });
     return { job: job ? publicJob(job) : null };
   }
 
   async approve(cookie: string | undefined, electionIdInput: string) {
     await this.auth.admin(cookie);
     const electionId = z.uuid().parse(electionIdInput);
-    const job = await this.db.maciProofJob.findUnique({ where: { electionId } });
+    const job = await this.db.maciProofJob.findFirst({ where: { electionId, election: { chainId: String(this.chain.config.CHAIN_ID) } } });
     if (!job || job.status !== 'READY' || !job.manifestJson || !job.eventsNdjson || !job.proofsJson || !job.tallyJson)
       throw new ConflictException({ code: 'MACI_PROOF_NOT_READY', message: 'Verified proof artifacts are not ready for publication.' });
     const files = { manifestJson: job.manifestJson, eventsNdjson: job.eventsNdjson, proofsJson: job.proofsJson, tallyJson: job.tallyJson };
@@ -95,13 +95,20 @@ export class MaciProofJobs {
 
   // Called only by the separate proof-worker entrypoint. No key is loaded by NestJS.
   async tick() {
+    if (this.chain.config.CHAIN_ID === 97 && process.env.MACI_BSC_TESTNET_ENABLED !== 'true') return;
+    const targetId = process.env.MACI_PROOF_ELECTION_ID;
+    if (targetId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId))
+      throw new Error('MACI_PROOF_ELECTION_ID must be a UUID');
     await this.markInterrupted();
     await this.chain.verifyNetwork();
-    const elections = await this.db.maciElection.findMany({ where: { status: { in: ['REGISTRATION', 'OPEN', 'CLOSED'] }, chainId: '31337',
+    const chainId = String(this.chain.config.CHAIN_ID);
+    const elections = await this.db.maciElection.findMany({ where: { status: { in: ['REGISTRATION', 'OPEN', 'CLOSED'] }, chainId,
+      ...(targetId ? { id: targetId } : {}),
       proofJob: { is: null }, deploymentJob: { is: { status: 'READY' } } }, orderBy: { createdAt: 'asc' }, take: 30 });
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const pending = await this.db.maciProofJob.findMany({ where: { status: 'AWAITING_CONFIRMATIONS' }, take: 10 });
-    if (process.env.MACI_PROOF_LOCAL_AUTOMINE === 'true' &&
+    const pending = await this.db.maciProofJob.findMany({ where: { status: 'AWAITING_CONFIRMATIONS', election: { chainId },
+      ...(targetId ? { electionId: targetId } : {}) }, take: 10 });
+    if (this.chain.config.CHAIN_ID === 31337 && process.env.MACI_PROOF_LOCAL_AUTOMINE === 'true' &&
         (elections.some(row => now > BigInt(row.endTimestamp)) || pending.length > 0)) {
       const response = await fetch(this.chain.config.RPC_URL, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] }) });
@@ -134,12 +141,14 @@ export class MaciProofJobs {
       });
     }
     for (const job of pending) await this.verifyReady(job.id);
-    const ready = await this.db.maciProofJob.findMany({ where: { status: 'READY' }, take: 10 });
+    const ready = await this.db.maciProofJob.findMany({ where: { status: 'READY', election: { chainId },
+      ...(targetId ? { electionId: targetId } : {}) }, take: 10 });
     for (const job of ready) {
       if (!(await this.matchesChain(job))) await this.db.maciProofJob.updateMany({ where: { id: job.id, status: 'READY' },
         data: { status: 'RECONCILIATION_REQUIRED', stage: 'CHAIN_REORG', diagnosticCode: 'MACI_PROOF_REORG' } });
     }
-    const queued = await this.db.maciProofJob.findFirst({ where: { status: 'QUEUED' }, orderBy: { createdAt: 'asc' } });
+    const queued = await this.db.maciProofJob.findFirst({ where: { status: 'QUEUED', election: { chainId },
+      ...(targetId ? { electionId: targetId } : {}) }, orderBy: { createdAt: 'asc' } });
     if (!queued) return;
     if (!(await this.matchesChain(queued))) {
       await this.db.maciProofJob.updateMany({ where: { id: queued.id, status: 'QUEUED' }, data: { status: 'RECONCILIATION_REQUIRED', diagnosticCode: 'MACI_PROOF_REORG' } });
@@ -154,9 +163,10 @@ export class MaciProofJobs {
     const job = await this.db.maciProofJob.findUniqueOrThrow({ where: { id } });
     const election = await this.db.maciElection.findUniqueOrThrow({ where: { id: job.electionId } });
     try {
+      if (election.chainId !== String(this.chain.config.CHAIN_ID)) throw new Error('CHAIN_MISMATCH');
       if (election.status !== 'CLOSED') throw new Error('ELECTION_NOT_CLOSED');
       if (!(await this.matchesChain(job))) throw new Error('REORG');
-      const config = { runId: job.runId, chainId: 31337, maciAddress: election.maciAddress,
+      const config = { runId: job.runId, chainId: this.chain.config.CHAIN_ID, genesisHash: job.genesisHash, maciAddress: election.maciAddress,
         pollId: election.pollId, deploymentBlock: Number(election.deploymentBlock), voteOptions: election.voteOptions };
       await mkdir(intentRoot, { recursive: true });
       const intent = join(intentRoot, `${job.runId}.json`);
@@ -165,7 +175,7 @@ export class MaciProofJobs {
       await this.db.maciProofJob.update({ where: { id }, data: { stage: 'COORDINATOR' } });
       const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, Path: process.env.Path, SystemRoot: process.env.SystemRoot,
         TEMP: process.env.TEMP, TMP: process.env.TMP, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE,
-        MACI_RPC_URL: this.chain.config.RPC_URL, MACI_COORDINATOR_PRIVATE_KEY: process.env.MACI_COORDINATOR_PRIVATE_KEY,
+        MACI_RPC_URL: this.chain.config.RPC_URL, CHAIN_ID: String(this.chain.config.CHAIN_ID), MACI_COORDINATOR_PRIVATE_KEY: process.env.MACI_COORDINATOR_PRIVATE_KEY,
         MACI_PROVER_PRIVATE_KEY: process.env.MACI_PROVER_PRIVATE_KEY };
       const exit = await new Promise<number>((done, reject) => {
         const child = spawn(process.execPath, [join(root, 'scripts/maci-coordinator.mjs'), intent], { cwd: root, env, stdio: 'ignore', windowsHide: true });
@@ -214,7 +224,9 @@ export class MaciProofJobs {
   }
 
   async markInterrupted() {
-    const running = await this.db.maciProofJob.findMany({ where: { status: 'RUNNING', updatedAt: { lt: new Date(Date.now() - 120_000) } } });
+    const targetId = process.env.MACI_PROOF_ELECTION_ID;
+    const running = await this.db.maciProofJob.findMany({ where: { status: 'RUNNING', election: { chainId: String(this.chain.config.CHAIN_ID) },
+      ...(targetId ? { electionId: targetId } : {}), updatedAt: { lt: new Date(Date.now() - 120_000) } } });
     for (const job of running) {
       let stage: string | null = null;
       try { stage = (JSON.parse(await readFile(join(outputRoot, job.runId, 'checkpoint.json'), 'utf8')) as { stage: string }).stage; }

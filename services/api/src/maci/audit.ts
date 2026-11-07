@@ -59,6 +59,7 @@ const configurationSchema = z.object({
   voteOptions: z.number().int().min(2).max(125),
   candidates: z.array(z.object({ id: z.string().min(1).max(120), name: z.string().min(1).max(120), optionIndex: z.number().int().nonnegative() }).strict()).min(2).max(125),
   artifactHashes: z.record(z.string(), sha), codeHashes: z.record(z.string(), hex32),
+  genesisHash: hex32.optional(),
   anchor: z.object({ sender: address, transactionHash: hex32 }).strict(),
 }).strict();
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -126,7 +127,7 @@ export class MaciAuditService {
     if (digest(files.eventsNdjson) !== manifest.evidenceHashes.events || digest(files.proofsJson) !== manifest.evidenceHashes.proofs || digest(files.tallyJson) !== manifest.evidenceHashes.tally) fail('MACI_AUDIT_HASH_MISMATCH');
     if (manifest.chainId !== Number(election.chainId) || manifest.maciAddress.toLowerCase() !== election.maciAddress || manifest.pollId !== election.pollId || manifest.pollAddress.toLowerCase() !== election.pollAddress || manifest.deploymentBlock !== Number(election.deploymentBlock) || manifest.tally.length !== election.voteOptions) fail('MACI_AUDIT_SCOPE_MISMATCH');
     if (tally.maci.toLowerCase() !== election.maciAddress || tally.pollId !== election.pollId || tally.chainId !== election.chainId || tally.tallyAddress.toLowerCase() !== manifest.tallyAddress.toLowerCase() || tally.results.tally.slice(0, election.voteOptions).some((value, index) => value !== manifest.tally[index]) || tally.results.tally.slice(election.voteOptions).some(value => value !== '0')) fail('MACI_TALLY_SCOPE_MISMATCH');
-    const provider = new JsonRpcProvider(this.chain.config.RPC_URL, Number(election.chainId));
+    const provider = new JsonRpcProvider(this.chain.config.RPC_URL, Number(election.chainId), { batchMaxCount: 1 });
     if (Number((await provider.getNetwork()).chainId) !== manifest.chainId) fail('MACI_CHAIN_MISMATCH');
     const finalityHead = await provider.getBlockNumber();
     if (finalityHead < manifest.snapshotBlock + this.chain.config.CHAIN_CONFIRMATIONS - 1) fail('MACI_SNAPSHOT_UNCONFIRMED');
@@ -220,6 +221,10 @@ export class MaciAuditService {
     const manifest = parseEvidence(manifestSchema, parseJson(record.manifestJson), 'MACI_AUDIT_MANIFEST_INVALID');
     const names = z.array(z.string()).parse(election.candidates);
     if (config.electionId !== electionId || config.chainId !== election.chainId || config.maciAddress.toLowerCase() !== election.maciAddress || config.pollAddress.toLowerCase() !== election.pollAddress || config.pollId !== election.pollId || config.deploymentBlock !== election.deploymentBlock || config.coordinatorKeyX !== election.coordinatorKeyX || config.coordinatorKeyY !== election.coordinatorKeyY || config.startTimestamp !== election.startTimestamp || config.endTimestamp !== election.endTimestamp || config.voteOptions !== election.voteOptions || config.candidates.length !== names.length || config.candidates.some((candidate, index) => candidate.optionIndex !== index || candidate.name !== names[index]) || new Set(config.candidates.map(candidate => candidate.id)).size !== config.candidates.length || canonical(config.artifactHashes) !== canonical(manifest.artifactHashes)) fail('MACI_CONFIG_SCOPE_MISMATCH');
+    if (election.chainId === '97') {
+      const genesis = await this.chain.client.getBlock({ blockNumber: 0n });
+      if (!config.genesisHash || config.genesisHash.toLowerCase() !== genesis.hash.toLowerCase()) fail('MACI_CONFIG_CHAIN_MISMATCH');
+    }
     const base: Record<string, unknown> = { ...config };
     delete base.anchor;
     const anchorHash = `0x${digest(`${canonical(base)}\n`)}`;

@@ -9,16 +9,19 @@ export class ChainService {
   async verifyNetwork() {
     if (await this.client.getChainId() !== this.config.CHAIN_ID) throw new Error('RPC chain mismatch');
   }
+  requireTransactionsEnabled() {
+    if (this.config.CHAIN_ID === 97 && process.env.MACI_BSC_TESTNET_ENABLED !== 'true') throw new ServiceUnavailableException({ code: 'MACI_TESTNET_DISABLED', message: 'BSC Testnet transactions are not enabled.' });
+  }
   async requireLocalContract(address: Address) {
     let chainId: number;
     try { chainId = await this.client.getChainId(); }
-    catch { throw new ServiceUnavailableException({ code: 'DEPENDENCY_UNAVAILABLE', message: 'Hardhat Local RPC is unavailable.' }); }
-    if (chainId !== 31337) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'Hardhat Local chain 31337 is required.' });
+    catch { throw new ServiceUnavailableException({ code: 'DEPENDENCY_UNAVAILABLE', message: 'Configured RPC is unavailable.' }); }
+    if (chainId !== this.config.CHAIN_ID) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'Configured RPC chain does not match this service.' });
     try {
-      if (!await this.client.getCode({ address })) throw new ServiceUnavailableException({ code: 'MACI_CONTRACT_MISSING', message: 'MACI contract is missing on Hardhat Local.' });
+      if (!await this.client.getCode({ address })) throw new ServiceUnavailableException({ code: 'MACI_CONTRACT_MISSING', message: 'MACI contract is missing on the configured chain.' });
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
-      throw new ServiceUnavailableException({ code: 'DEPENDENCY_UNAVAILABLE', message: 'Hardhat Local RPC is unavailable.' });
+      throw new ServiceUnavailableException({ code: 'DEPENDENCY_UNAVAILABLE', message: 'Configured RPC is unavailable.' });
     }
   }
 }

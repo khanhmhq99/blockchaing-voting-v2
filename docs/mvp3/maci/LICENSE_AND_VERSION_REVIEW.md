@@ -1,5 +1,40 @@
 # MACI license and version review
 
+## 2026-11-02 browser distribution and runtime recheck
+
+The upstream `v3.0.0` checkout still resolves to
+`4d0e3a35f9f0c0122101050903bfcb383f7aaaa4`. Five archived official npm
+tarballs matched the SHA-256 inventory below; contracts and SDK also matched
+the root lockfile SHA-512 integrity and coordinator matched the isolated
+runtime lockfile. Circuits and relayer are not installed in those lockfiles.
+All five archives contain MIT `LICENSE` text, but the ZKey archive does not
+carry an independent license or ceremony manifest.
+
+The directly imported browser `snarkjs@0.7.6` declares GPL-3.0 and includes
+the full `COPYING` text. The project has no top-level distribution license or
+corresponding-source publication path. Before hosting a browser build for
+others, the owner must decide the distribution model and obtain appropriate
+license review. See the [upstream snarkjs license](https://github.com/iden3/snarkjs)
+and [GPLv3 source terms](https://www.gnu.org/licenses/gpl.en.html). This is a
+material open item, not resolved by the MACI packages' MIT text.
+
+The [lockfile license inventory](LICENSE_INVENTORY_2026-11-02.json) records
+963 non-dev lock entries, including optional platform packages and the MACI
+build/deploy toolchain that is classified as production by upstream package
+metadata. Seventeen entries have no declared package license. Twenty-eight
+declare a license string containing GPL (including LGPL), among them
+`snarkjs`, `ffjavascript`, `circomlibjs`, `r1csfile` and optional libvips
+platform binaries. This is a triage inventory, not a legal compatibility
+opinion or proof that every entry is shipped in the browser. The browser's
+direct `snarkjs` import remains the material distribution decision.
+
+Node 24.21.0/npm 11.19.0 typecheck, lint, API build, BSC static web build and
+23 focused tests passed after patching Nest Express, Zod and a transitive
+redirect library. The packaged upstream contract build-info reports solc
+0.8.28/Paris/optimizer 200; custom policies compile with 0.8.37/Cancun/200.
+The [dated readiness report](BSC_DEPLOYMENT_READINESS_2026-11-02.md) records
+the BSC fork evidence and remaining runtime/deployment limitations.
+
 ## Local runtime probe, 2026-10-15
 
 Exact direct versions `@maci-protocol/{crypto,domainobjs,core,contracts,sdk}@3.0.0`, `@maci-protocol/coordinator@1.0.0`, `ethers@6.15.0` and `hardhat@2.25.0` were installed with `--save-exact --ignore-scripts` only in ignored `research/mvp3/maci/runtime-env/` (npm exit 0). The resolver also installed a nested Hardhat 2.29.1 under MACI contracts for peer compatibility. A Node 24 smoke import for SDK deployment/proof APIs and contract helpers exited 0; an in-process Hardhat network yielded 20 synthetic signers on chain 31337 after loading that nested plugin. These checks do not establish full Node 24 support or BSC bytecode compatibility. Authorized `npm audit --omit=dev --json` exited 1 with 87 advisories (19 low, 36 moderate, 32 high, 0 critical); machine-readable output is in ignored `probe-output/runtime-audit.json`. The compiler-only environment has another three high advisories via `bfj -> jsonpath -> underscore`. No audited dependency decision or product installation has occurred.

@@ -32,6 +32,7 @@ export class MaciRegistrationRelay {
   }
 
   async submit(cookie: string | undefined, electionIdInput: string) {
+    this.chain.requireTransactionsEnabled();
     const user = await this.auth.authenticate(cookie);
     const electionId = z.uuid().parse(electionIdInput);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
@@ -88,6 +89,7 @@ export class MaciRegistrationRelay {
 
   private async reconcile(id: string) {
     const row = await this.db.maciRegistration.findUniqueOrThrow({ where: { id }, include: { election: true } });
+    if (row.election.chainId !== String(this.chain.config.CHAIN_ID) || await this.chain.client.getChainId() !== this.chain.config.CHAIN_ID) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'Registration belongs to another chain.' });
     if (!row.rawTransaction || !row.transactionHash || !row.calldataHash || row.nonce === null) return row;
     const account = sponsorAccount();
     const raw = row.rawTransaction as Hex;

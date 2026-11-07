@@ -125,6 +125,7 @@ model MaciParticipationRequest {
 // A claimed job is never automatically rerun after a crash: a transaction may have been submitted.
 model MaciDeploymentJob {
   id String @id @default(uuid()) @db.Uuid
+  chainId String @default("31337")
   requestedById String @db.Uuid
   idempotencyKey String
   requestHash String
@@ -142,6 +143,7 @@ model MaciDeploymentJob {
 
   @@unique([requestedById, idempotencyKey])
   @@index([status, createdAt])
+  @@index([chainId, status, createdAt])
   @@schema("voting")
 }
 
@@ -312,10 +314,11 @@ model MaciChainCheckpoint {
   id          String @id @default(uuid()) @db.Uuid
   chainId     String
   pollAddress String
+  deploymentInstanceId String @default("legacy")
   blockNumber BigInt
   blockHash   String
   updatedAt   DateTime @updatedAt @db.Timestamptz(6)
 
-  @@unique([chainId, pollAddress])
+  @@unique([chainId, pollAddress, deploymentInstanceId])
   @@schema("voting")
 }

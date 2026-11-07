@@ -22,14 +22,16 @@ export function databaseOptions(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export function chainConfig(env: NodeJS.ProcessEnv = process.env) {
-  const config = z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().positive(), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
+  const config = z.object({ RPC_URL: z.url(), CHAIN_ID: z.coerce.number().int().refine(value => value === 31337 || value === 97), CHAIN_CONFIRMATIONS: z.coerce.number().int().min(1).max(100) }).parse({ ...env, CHAIN_CONFIRMATIONS: env.CHAIN_CONFIRMATIONS ?? '2' });
   const rpc = new URL(config.RPC_URL);
-  if (config.CHAIN_ID !== 31337 || rpc.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(rpc.hostname) || rpc.username || rpc.password || rpc.pathname !== '/' || rpc.search || rpc.hash) {
-    throw new Error('Hardhat Local chain 31337 and a loopback HTTP RPC are required.');
+  const local = config.CHAIN_ID === 31337;
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(rpc.hostname);
+  if (rpc.username || rpc.password || rpc.hash || !['http:', 'https:'].includes(rpc.protocol) ||
+      (local && (rpc.protocol !== 'http:' || !loopback || rpc.pathname !== '/' || rpc.search)) ||
+      (!local && (rpc.protocol !== 'https:' || loopback))) {
+    throw new Error(local ? 'Hardhat Local requires a loopback HTTP RPC.' : 'BSC Testnet requires a non-loopback HTTPS RPC without embedded credentials.');
   }
-  if ((env.MACI_RPC_URL && env.MACI_RPC_URL !== config.RPC_URL) ||
-      (env.NEXT_PUBLIC_MACI_RPC_URL && env.NEXT_PUBLIC_MACI_RPC_URL !== config.RPC_URL)) {
-    throw new Error('API, coordinator, and browser must use the same Hardhat Local RPC.');
-  }
+  if (env.MACI_RPC_URL && env.MACI_RPC_URL !== config.RPC_URL) throw new Error('MACI_RPC_URL must match the API RPC_URL.');
+  if (local && env.NEXT_PUBLIC_MACI_RPC_URL && env.NEXT_PUBLIC_MACI_RPC_URL !== config.RPC_URL) throw new Error('Local browser and API must use the same Hardhat RPC.');
   return config;
 }

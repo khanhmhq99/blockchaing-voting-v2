@@ -49,6 +49,7 @@ export class MaciJoinRelay {
   }
 
   async submit(electionIdInput: string, body: unknown, idempotencyKey: string | undefined, cookie: string | undefined) {
+    this.chain.requireTransactionsEnabled();
     if (cookie) throw new ForbiddenException({ code: 'MACI_IDENTITY_COOKIE_FORBIDDEN', message: 'Submit joining proofs without an identity session.' });
     const election = await this.db.maciElection.findUnique({ where: { id: z.uuid().parse(electionIdInput) } });
     if (!election || election.status !== 'OPEN') throw new ConflictException({ code: 'MACI_POLL_NOT_OPEN', message: 'MACI poll is not open.' });
@@ -99,6 +100,7 @@ export class MaciJoinRelay {
   private async reconcile(id: string) {
     const row = await this.db.maciPollJoinSubmission.findUnique({ where: { id } });
     if (!row) throw new ConflictException({ code: 'MACI_JOIN_MISSING', message: 'Joining proof was not found.' });
+    if (row.chainId !== String(this.chain.config.CHAIN_ID) || await this.chain.client.getChainId() !== this.chain.config.CHAIN_ID) throw new ServiceUnavailableException({ code: 'MACI_CHAIN_MISMATCH', message: 'Joining proof belongs to another chain.' });
     if (!row.rawTransaction || !row.transactionHash || !row.calldataHash || row.nonce === null) return row;
     const account = sponsorAccount();
     const raw = row.rawTransaction as Hex;

@@ -65,7 +65,7 @@ export class MaciService {
   ) {}
 
   async verifyDeployment(input: z.infer<typeof deploymentSchema>) {
-    if (input.chainId !== '31337' || this.chain.config.CHAIN_ID !== 31337 || await this.chain.client.getChainId() !== 31337) throw new ConflictException({ code: 'MACI_CHAIN_MISMATCH', message: 'This MACI election requires Hardhat Local chain 31337.' });
+    if (input.chainId !== String(this.chain.config.CHAIN_ID) || await this.chain.client.getChainId() !== this.chain.config.CHAIN_ID) throw new ConflictException({ code: 'MACI_CHAIN_MISMATCH', message: 'This MACI election belongs to another chain.' });
     if (BigInt(input.deploymentBlock) > await this.chain.client.getBlockNumber()) throw new ConflictException({ code: 'MACI_DEPLOYMENT_BLOCK_INVALID', message: 'MACI deployment block is in the future.' });
     for (const address of [input.maciAddress, input.registrationAddress, input.pollAddress]) {
       if (!await this.chain.client.getCode({ address })) throw new ConflictException({ code: 'MACI_CONTRACT_MISSING', message: 'A configured MACI contract is missing.' });
@@ -122,6 +122,7 @@ export class MaciService {
     const { status } = z.object({ status: z.enum(['OPEN', 'CLOSED']) }).strict().parse(body);
     const election = await this.db.maciElection.findUnique({ where: { id: electionId } });
     if (!election) throw new ConflictException({ code: 'MACI_ELECTION_MISSING', message: 'MACI election was not found.' });
+    await this.verifyDeployment({ chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock });
     const blockNow = (await this.chain.client.getBlock()).timestamp;
     const now = election.chainId === '31337' ? effectiveLocalElectionTime(blockNow, BigInt(Math.floor(Date.now() / 1000))) : blockNow;
     if (status === 'OPEN' && (election.status !== 'REGISTRATION' || now < BigInt(election.startTimestamp) || now > BigInt(election.endTimestamp))) throw new ConflictException({ code: 'MACI_POLL_NOT_OPEN', message: 'On-chain voting window is not open.' });
@@ -141,7 +142,8 @@ export class MaciService {
         const actual = await this.verifyDeployment({ chainId: election.chainId, maciAddress: getAddress(election.maciAddress), registrationAddress: getAddress(election.registrationAddress), pollAddress: getAddress(election.pollAddress), pollId: election.pollId, deploymentBlock: election.deploymentBlock });
         if (actual.startTimestamp !== election.startTimestamp || actual.endTimestamp !== election.endTimestamp || actual.voteOptions !== election.voteOptions) throw new Error('poll mismatch');
         if (status !== 'VERIFIED') {
-          const now = effectiveLocalElectionTime((await this.chain.client.getBlock()).timestamp, BigInt(Math.floor(Date.now() / 1000)));
+          const blockNow = (await this.chain.client.getBlock()).timestamp;
+          const now = election.chainId === '31337' ? effectiveLocalElectionTime(blockNow, BigInt(Math.floor(Date.now() / 1000))) : blockNow;
           const next = timedElectionStatus(now, election.startTimestamp, election.endTimestamp);
           if (next !== status && (status === 'REGISTRATION' || status === 'OPEN')) {
             const updated = await this.db.maciElection.updateMany({ where: { id: election.id, status }, data: { status: next } });

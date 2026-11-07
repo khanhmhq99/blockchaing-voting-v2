@@ -48,5 +48,5 @@ test('approval during the voting window alone cannot unlock an unregistered or u
   assert.match(voteBlockReason({ ...ready, joinIndex: null }) ?? '', /tham gia poll/);
   assert.match(voteBlockReason({ ...ready, credentialReady: false }) ?? '', /Khóa MACI/);
   assert.match(voteBlockReason({ ...ready, chainHealth: 'INVALID_OR_UNAVAILABLE' }) ?? '', /deployment MACI/);
-  assert.match(voteBlockReason({ ...ready, chainId: '97' }) ?? '', /31337/);
+  assert.match(voteBlockReason({ ...ready, chainId: '97' }) ?? '', /mạng khác/);
 });

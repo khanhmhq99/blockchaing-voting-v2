@@ -2,7 +2,7 @@
 
 This repository's active application is a synthetic, walletless MACI v3 voting prototype for an HCMUT Master's thesis. It uses a Next.js desktop voter/admin interface, a NestJS API, an authorized Supabase PostgreSQL `voting` schema, sponsored on-chain registration and encrypted message submission, and a separate coordinator that produces processing and tally proofs. The chain and proofs determine the accepted tally; database records are projections and published evidence.
 
-The current local application integration completed with two synthetic voters and a verified `[1,1,0]` tally. See [MACI progress and recovery](docs/mvp3/maci/PROGRESS.md), [implementation plan](docs/mvp3/maci/IMPLEMENTATION_PLAN.md), [benchmarks](docs/mvp3/maci/BENCHMARKS.md) and [architecture decision](docs/architecture/adr/0010-maci-mvp3-protocol-migration.md). BSC Testnet deployment has **not** occurred. M0 provenance and security review remain deferred and unapproved.
+The local application integration completed with two synthetic voters and a verified `[1,1,0]` tally. A separate synthetic BSC Testnet chain-97 election then completed registration, encrypted voting, genuine processing/tally proofs, public audit and an independent verifier `PASS` with the same aggregate tally. See [the BSC evidence](docs/mvp3/maci/BSC_DEPLOYMENT_READINESS_2026-11-02.md#verified-synthetic-e2e-result), [MACI progress](docs/mvp3/maci/PROGRESS.md), [implementation plan](docs/mvp3/maci/IMPLEMENTATION_PLAN.md), [benchmarks](docs/mvp3/maci/BENCHMARKS.md) and [architecture decision](docs/architecture/adr/0010-maci-mvp3-protocol-migration.md). Independent trusted-setup ceremony provenance remains a documented research limitation.
 
 The current [dashboard and browser workflow continuation](docs/enhancements/maci-dashboard-automation/IMPLEMENTATION.md) documents the Admin/Voter routes and automatic registration/join prerequisites. [Local MACI credentials](docs/mvp3/maci/LOCAL_CREDENTIALS.md) documents browser persistence and recovery limits.
 
@@ -16,9 +16,9 @@ MVP 1/2/2.5 results remain in `docs/mvps/`, `docs/benchmarks/`, prior deployment
 
 - `apps/voter-web/`: browser-local MACI credential, joining proof, encrypted command and final results; no voter wallet is required.
 - `services/api/`: account sessions, eligibility, MACI registration and anonymous join/message relays, audit verification/publication.
-- `services/api/prisma/`: MACI-first schema and six versioned migrations, up to date on the configured Supabase development schema as of 2026-10-25.
+- `services/api/prisma/`: MACI-first schema and nine versioned migrations, applied to the separate Hardhat Local and BSC Testnet Supabase projects.
 - `packages/contracts/contracts/`: sponsored MACI registration and open poll-join policy.
-- `scripts/deploy-maci-local.mjs`: explicit synthetic deployment to a persistent Hardhat chain 31337 only.
+- `scripts/deploy-maci-local.mjs`: shared guarded synthetic deployment implementation; `scripts/deploy-maci-testnet.mjs` is the explicit chain-97 entrypoint.
 - `scripts/maci-coordinator.mjs`: explicit proof generation, on-chain submission and public evidence export.
 
 ## Local checks
@@ -34,8 +34,8 @@ npm.cmd run typecheck
 npm.cmd run build
 ```
 
-The existing `.env` points to BSC Testnet. Explicitly override `RPC_URL`, `MACI_RPC_URL`, `CHAIN_ID` and `NEXT_PUBLIC_MACI_RPC_URL` to 31337/loopback for local integration. The MACI local launcher and exact synthetic run evidence are described in [PROGRESS.md](docs/mvp3/maci/PROGRESS.md). Do not reuse ephemeral Hardhat addresses after its process stops.
+The existing ignored `.env` selects Hardhat Local 31337. Keep it separate from the ignored `.env.bsc-testnet` and dedicated BSC database described in the [BSC Testnet deployment guide](docs/deployment/bsc-testnet.md). The MACI local launcher and exact synthetic run evidence are described in [PROGRESS.md](docs/mvp3/maci/PROGRESS.md). Do not reuse ephemeral Hardhat addresses after its process stops.
 
 ## Research limits
 
-Use synthetic accounts and test assets only. The issuer and coordinator are trusted prototype roles; the coordinator can decrypt individual commands. MACI artifact ceremony provenance, dependency advisories, operational key separation and BSC deployment compatibility need further review. This prototype does not claim coercion resistance, protection from a compromised client, or privacy against a colluding issuer and coordinator. See [threat model](docs/security/threat-model.md) and [artifact provenance](docs/mvp3/maci/ARTIFACT_PROVENANCE.md).
+Use synthetic accounts and test assets only. The issuer and coordinator are trusted prototype roles; the coordinator can decrypt individual commands. MACI artifact ceremony provenance, dependency advisories and operational key separation remain research limitations. The synthetic BSC chain-97 run passed deployment and proof compatibility checks; it is not mainnet or real-electorate validation. This prototype does not claim coercion resistance, protection from a compromised client, or privacy against a colluding issuer and coordinator. See [threat model](docs/security/threat-model.md) and [artifact provenance](docs/mvp3/maci/ARTIFACT_PROVENANCE.md).
